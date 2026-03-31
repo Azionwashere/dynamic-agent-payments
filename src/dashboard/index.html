@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Payments — Activity Feed</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 24px; }
+    h1 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #fff; }
+    .status-bar { display: flex; gap: 16px; margin-bottom: 24px; padding: 12px 16px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333; }
+    .status-item { font-size: 13px; }
+    .status-label { color: #888; }
+    .status-value { color: #4ade80; font-weight: 600; }
+    .feed { display: flex; flex-direction: column; gap: 4px; }
+    .event { padding: 8px 12px; border-radius: 6px; font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; border-left: 3px solid #333; background: #111; }
+    .event .time { color: #666; margin-right: 8px; }
+    .event .type { font-weight: 600; margin-right: 8px; }
+    .event.checkout_tx_created .type { color: #60a5fa; }
+    .event.checkout_quoted .type { color: #a78bfa; }
+    .event.checkout_signing .type { color: #fbbf24; }
+    .event.checkout_broadcast .type { color: #f97316; }
+    .event.checkout_complete .type { color: #4ade80; }
+    .event.x402_start .type { color: #60a5fa; }
+    .event.x402_complete .type { color: #4ade80; }
+    .event.fund_start .type { color: #60a5fa; }
+    .event.fund_complete .type { color: #4ade80; }
+    .event .data { color: #888; }
+    .empty { color: #555; font-style: italic; padding: 40px; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>Dynamic Agent Payments</h1>
+  <div class="status-bar">
+    <div class="status-item"><span class="status-label">Events: </span><span class="status-value" id="count">0</span></div>
+    <div class="status-item"><span class="status-label">Status: </span><span class="status-value" id="status">Waiting...</span></div>
+  </div>
+  <div class="feed" id="feed">
+    <div class="empty">Waiting for agent activity...</div>
+  </div>
+
+  <script>
+    const feed = document.getElementById('feed');
+    const countEl = document.getElementById('count');
+    const statusEl = document.getElementById('status');
+    let count = 0;
+    let firstEvent = true;
+
+    const source = new EventSource('/events');
+    source.onmessage = (e) => {
+      if (firstEvent) { feed.innerHTML = ''; firstEvent = false; }
+      try {
+        const event = JSON.parse(e.data);
+        count++;
+        countEl.textContent = count;
+        statusEl.textContent = event.type.replace(/_/g, ' ');
+
+        const div = document.createElement('div');
+        div.className = `event ${event.type}`;
+        const time = new Date(event.timestamp).toLocaleTimeString();
+        const dataStr = Object.entries(event.data || {}).map(([k,v]) => `${k}=${v}`).join(' ');
+        div.innerHTML = `<span class="time">${time}</span><span class="type">${event.type}</span><span class="data">${dataStr}</span>`;
+        feed.appendChild(div);
+        div.scrollIntoView({ behavior: 'smooth' });
+      } catch {}
+    };
+    source.onerror = () => { statusEl.textContent = 'Disconnected'; statusEl.style.color = '#f87171'; };
+  </script>
+</body>
+</html>

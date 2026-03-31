@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+*.tsbuildinfo
+
+# Test scripts with env-specific data
+test-*.ts
+.env
+.DS_Store
