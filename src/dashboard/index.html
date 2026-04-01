@@ -26,6 +26,7 @@
     .event.fund_start .type { color: #60a5fa; }
     .event.fund_complete .type { color: #4ade80; }
     .event .data { color: #888; }
+    .event .memo { color: #c084fc; font-weight: 500; margin-left: 8px; padding: 1px 6px; background: #1e1033; border-radius: 3px; font-size: 11px; }
     .empty { color: #555; font-style: italic; padding: 40px; text-align: center; }
   </style>
 </head>
@@ -58,8 +59,11 @@
         const div = document.createElement('div');
         div.className = `event ${event.type}`;
         const time = new Date(event.timestamp).toLocaleTimeString();
-        const dataStr = Object.entries(event.data || {}).map(([k,v]) => `${k}=${v}`).join(' ');
-        div.innerHTML = `<span class="time">${time}</span><span class="type">${event.type}</span><span class="data">${dataStr}</span>`;
+        const memo = event.data?.memo;
+        const dataEntries = Object.entries(event.data || {}).filter(([k]) => k !== 'memo');
+        const dataStr = dataEntries.map(([k,v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' ');
+        const memoStr = memo ? `<span class="memo">${typeof memo === 'object' ? Object.values(memo).join(' · ') : memo}</span>` : '';
+        div.innerHTML = `<span class="time">${time}</span><span class="type">${event.type}</span><span class="data">${dataStr}</span>${memoStr}`;
         feed.appendChild(div);
         div.scrollIntoView({ behavior: 'smooth' });
       } catch {}

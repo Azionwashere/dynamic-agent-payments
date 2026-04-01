@@ -2,6 +2,13 @@ export { loadConfig, resetConfig } from './config.js';
 export { createEventEmitter, emitEvent } from './events.js';
 export {
   createCheckout,
+  createTransaction,
+  attachSource,
+  waitForRiskClearance,
+  getQuote,
+  prepareSigning,
+  recordBroadcast,
+  pollSettlement,
   executeCheckoutFlow,
   getTransactionStatus,
 } from './checkout-client.js';

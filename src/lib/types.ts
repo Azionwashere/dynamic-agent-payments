@@ -21,19 +21,40 @@ export interface PaymentQuote {
   estimatedTimeSec: number;
   fees: {
     totalFeeUsd: string;
-  };
-  quoteExpiresAt?: string;
-  signingPayload?: {
-    chainId: string;
-    chainName: string;
-    evmTransaction?: {
-      to: string;
-      data: string;
-      value: string;
-      gasLimit: string;
-      gasPrice: string;
+    gasEstimate?: {
+      usdValue: string;
+      nativeValue: string;
+      nativeSymbol: string;
     };
   };
+  quoteExpiresAt?: string;
+  version?: number;
+}
+
+export interface PrepareResult {
+  signingPayload: CheckoutSigningPayload;
+  quote: PaymentQuote;
+}
+
+export interface CheckoutSigningPayload {
+  chainName: string;
+  chainId: string;
+  evmTransaction?: {
+    to: string;
+    data: string;
+    value: string;
+    gasLimit: string;
+    gasPrice?: string;
+    maxFeePerGas?: string;
+    maxPriorityFeePerGas?: string;
+  };
+  evmApproval?: {
+    tokenAddress: string;
+    spenderAddress: string;
+    amount: string;
+  };
+  serializedTransaction?: string; // SOL, SUI — base64
+  psbt?: string; // BTC — base64 unsigned PSBT
 }
 
 export interface SigningPayload {
@@ -54,6 +75,7 @@ export interface SettlementResult {
   executionState: string;
   settlementState: string;
   completedAt?: string;
+  memo?: Record<string, unknown>;
 }
 
 export interface X402PaymentRequirements {
@@ -85,5 +107,7 @@ export interface AgentEvent {
 }
 
 export type SignTransactionFn = (payload: SigningPayload, chainName: string) => Promise<string>;
+
+export type ApprovalFn = (approval: { tokenAddress: string; spenderAddress: string; amount: string }) => Promise<string>;
 
 export type EventCallback = (event: AgentEvent) => void;

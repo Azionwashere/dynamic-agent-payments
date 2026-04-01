@@ -15,6 +15,8 @@ export const fundAgentSchema = z.object({
   toTokenAddress: z.string().describe('Settlement token contract address'),
   toTokenDecimals: z.number().default(6).describe('Settlement token decimals'),
   amountUsd: z.string().describe('Amount in USD to fund'),
+  slippage: z.number().optional().describe('Slippage tolerance as decimal (e.g., 0.005 for 0.5%)'),
+  memo: z.record(z.unknown()).optional().describe('Metadata to tag this transaction (e.g., { "purpose": "anthropic-credits" })'),
 });
 
 export type FundAgentInput = z.infer<typeof fundAgentSchema>;
@@ -32,6 +34,7 @@ export async function fundAgent(
     fromChain: input.fromChainName,
     toChain: input.toChainName,
     amountUsd: input.amountUsd,
+    ...(input.memo ? { memo: input.memo } : {}),
   });
 
   const walletAddress = await getWalletAddress();
@@ -67,13 +70,17 @@ export async function fundAgent(
     sourceChainName: input.fromChainName,
     fromTokenAddress: input.fromTokenAddress,
     signTransaction: signAndBroadcastTransaction,
+    slippage: input.slippage,
     minFundingThresholdUsd: config.minFundingThresholdUsd,
     emit,
+    memo: input.memo,
+    // TODO: implement sendApproval for ERC-20 token swaps
   });
 
   if (emit) emitEvent(emit, 'fund_complete', {
     txHash: result.txHash,
     settlementState: result.settlementState,
+    ...(input.memo ? { memo: input.memo } : {}),
   });
 
   return result;

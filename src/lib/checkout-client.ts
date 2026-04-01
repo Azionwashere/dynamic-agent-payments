@@ -2,12 +2,16 @@ import type {
   CheckoutConfig,
   PaymentSession,
   PaymentQuote,
+  CheckoutSigningPayload,
   SigningPayload,
   SettlementResult,
   SignTransactionFn,
+  ApprovalFn,
   EventCallback,
 } from './types.js';
 import { emitEvent } from './events.js';
+
+const SESSION_HEADER = 'x-dynamic-checkout-session-token';
 
 async function checkoutApi(
   apiBase: string,
@@ -99,7 +103,7 @@ export async function attachSource(
 ): Promise<void> {
   await checkoutApi(apiBase, `/sdk/${environmentId}/transactions/${transactionId}/source`, {
     method: 'POST',
-    headers: { 'X-Dynamic-Checkout-Session-Token': sessionToken },
+    headers: { [SESSION_HEADER]: sessionToken },
     body: JSON.stringify({
       sourceType: 'wallet',
       fromAddress: walletAddress,
@@ -128,70 +132,66 @@ export async function waitForRiskClearance(
     if (risk === 'blocked') throw new Error('Payment source blocked by risk screening');
     await new Promise(r => setTimeout(r, 2_000));
   }
-  // Timeout — proceed and let the quote call fail if risk isn't cleared
 }
 
 // Step 4b: Get quote
-// The mainnet response returns the full transaction object with quote nested inside.
-// The quote includes fromAmount/toAmount (not fromTokenAmount/toTokenAmount)
-// and the signingPayload is embedded in the quote (no separate /prepare call needed).
 export async function getQuote(
   apiBase: string,
   environmentId: string,
   transactionId: string,
   sessionToken: string,
   fromTokenAddress: string,
+  slippage?: number,
 ): Promise<PaymentQuote> {
+  const body: Record<string, unknown> = { fromTokenAddress };
+  if (slippage !== undefined) body.slippage = slippage;
+
   const data = await checkoutApi(
     apiBase,
     `/sdk/${environmentId}/transactions/${transactionId}/quote`,
     {
       method: 'POST',
-      headers: { 'X-Dynamic-Checkout-Session-Token': sessionToken },
-      body: JSON.stringify({ fromTokenAddress }),
+      headers: { [SESSION_HEADER]: sessionToken },
+      body: JSON.stringify(body),
     },
   );
-  // Normalize: quote can be at data.quote, data.transaction.quote, or data itself
+  // Quote is at data.quote per spec
   const quote = data.quote ?? data.transaction?.quote ?? data;
 
-  // Normalize field names: mainnet uses fromAmount/toAmount, docs say fromTokenAmount/toTokenAmount
-  const normalized: PaymentQuote = {
+  return {
     fromAmount: quote.fromAmount ?? quote.fromTokenAmount ?? '0',
     toAmount: quote.toAmount ?? quote.toTokenAmount ?? '0',
     estimatedTimeSec: quote.estimatedTimeSec ?? 0,
     fees: quote.fees ?? { totalFeeUsd: '0' },
     quoteExpiresAt: quote.expiresAt,
-    signingPayload: quote.signingPayload,
+    version: quote.version,
   };
-
-  if (!normalized.fees) {
-    throw new Error(`Unexpected quote response shape: ${JSON.stringify(data)}`);
-  }
-  return normalized;
 }
 
-// Step 5: Prepare signing
+// Step 5: Prepare signing — locks the quote and returns signing payload
 export async function prepareSigning(
   apiBase: string,
   environmentId: string,
   transactionId: string,
   sessionToken: string,
-): Promise<SigningPayload> {
+): Promise<CheckoutSigningPayload> {
   const data = await checkoutApi(
     apiBase,
     `/sdk/${environmentId}/transactions/${transactionId}/prepare`,
     {
       method: 'POST',
-      headers: { 'X-Dynamic-Checkout-Session-Token': sessionToken },
+      headers: { [SESSION_HEADER]: sessionToken },
     },
   );
-  // Normalize: 4 possible payload locations
+  // Per spec: signing payload is at quote.signingPayload
   const payload =
+    data.quote?.signingPayload ??
     data.transaction?.signingPayload ??
-    data.signingPayload ??
-    data.quote?.route?.signingPayload ??
-    data;
+    data.signingPayload;
 
+  if (!payload) {
+    throw new Error(`No signing payload in prepare response: ${JSON.stringify(data).slice(0, 200)}`);
+  }
   return payload;
 }
 
@@ -208,7 +208,7 @@ export async function recordBroadcast(
     `/sdk/${environmentId}/transactions/${transactionId}/broadcast`,
     {
       method: 'POST',
-      headers: { 'X-Dynamic-Checkout-Session-Token': sessionToken },
+      headers: { [SESSION_HEADER]: sessionToken },
       body: JSON.stringify({ txHash }),
     },
   );
@@ -220,7 +220,7 @@ export async function pollSettlement(
   environmentId: string,
   transactionId: string,
   onStatus?: (executionState: string, settlementState: string) => void,
-  maxDurationMs = 300_000, // 5 minutes
+  maxDurationMs = 300_000,
 ): Promise<SettlementResult> {
   const start = Date.now();
   while (Date.now() - start < maxDurationMs) {
@@ -241,6 +241,7 @@ export async function pollSettlement(
         executionState: exec,
         settlementState: settle,
         completedAt: tx.completedAt,
+        memo: tx.memo,
       };
     }
     if (settle === 'failed' || ['cancelled', 'expired', 'failed'].includes(exec)) {
@@ -279,6 +280,8 @@ export async function executeCheckoutFlow(params: {
   sourceChainName: string;
   fromTokenAddress: string;
   signTransaction: SignTransactionFn;
+  sendApproval?: ApprovalFn;
+  slippage?: number;
   minFundingThresholdUsd?: string;
   emit?: EventCallback;
   memo?: Record<string, unknown>;
@@ -286,11 +289,13 @@ export async function executeCheckoutFlow(params: {
   const {
     apiBase, environmentId, checkoutId, amountUsd,
     sourceAddress, sourceChainId, sourceChainName,
-    fromTokenAddress, signTransaction, emit, memo,
+    fromTokenAddress, signTransaction, sendApproval,
+    slippage, emit, memo,
     minFundingThresholdUsd = '1.00',
   } = params;
 
   const log = (type: string, data: Record<string, unknown> = {}) => {
+    if (memo) data.memo = memo;
     if (emit) emitEvent(emit, type, data);
   };
 
@@ -318,16 +323,15 @@ export async function executeCheckoutFlow(params: {
   log('checkout_risk_check', { transactionId: session.transactionId });
   await waitForRiskClearance(apiBase, environmentId, session.transactionId);
 
-  // Step 4b: Get quote (with retry on expiry)
-  // The quote response includes the signing payload — no separate /prepare call needed.
-  let quote: PaymentQuote;
+  // Step 4b + 5: Get quote then prepare signing (with retry on expiry)
   let retries = 0;
   const MAX_QUOTE_RETRIES = 3;
   while (true) {
-    quote = await getQuote(
+    // Step 4b: Get quote
+    const quote = await getQuote(
       apiBase, environmentId,
       session.transactionId, session.sessionToken,
-      fromTokenAddress,
+      fromTokenAddress, slippage,
     );
     log('checkout_quoted', {
       fromAmount: quote.fromAmount,
@@ -337,27 +341,41 @@ export async function executeCheckoutFlow(params: {
     });
 
     try {
-      // Step 5: Extract signing payload from quote
-      // Mainnet returns signingPayload inside quote; fall back to /prepare if missing
-      let signingPayload: SigningPayload;
-      if (quote.signingPayload?.evmTransaction) {
-        signingPayload = {
-          to: quote.signingPayload.evmTransaction.to,
-          data: quote.signingPayload.evmTransaction.data,
-          value: quote.signingPayload.evmTransaction.value,
-          transactionRequest: quote.signingPayload.evmTransaction,
-        };
-      } else {
-        // Fallback to separate /prepare call (for API versions that don't embed it)
-        signingPayload = await prepareSigning(
-          apiBase, environmentId,
-          session.transactionId, session.sessionToken,
-        );
+      // Step 5: Prepare signing — locks the quote, returns signing payload
+      log('checkout_preparing', { transactionId: session.transactionId });
+      const signingPayload = await prepareSigning(
+        apiBase, environmentId,
+        session.transactionId, session.sessionToken,
+      );
+
+      // Step 6a: Handle ERC-20 approval if required
+      if (signingPayload.evmApproval) {
+        log('checkout_approval', {
+          tokenAddress: signingPayload.evmApproval.tokenAddress,
+          spenderAddress: signingPayload.evmApproval.spenderAddress,
+          amount: signingPayload.evmApproval.amount,
+        });
+        if (!sendApproval) {
+          throw new Error(
+            'ERC-20 approval required but no sendApproval function provided. ' +
+            'This token requires an approval transaction before the swap.'
+          );
+        }
+        await sendApproval(signingPayload.evmApproval);
       }
 
-      // Step 6: Sign and broadcast via wallet
+      // Step 6b: Sign and broadcast the main transaction
+      const mainPayload: SigningPayload = signingPayload.evmTransaction
+        ? {
+            to: signingPayload.evmTransaction.to,
+            data: signingPayload.evmTransaction.data,
+            value: signingPayload.evmTransaction.value,
+            transactionRequest: signingPayload.evmTransaction,
+          }
+        : { serializedTransaction: signingPayload.serializedTransaction };
+
       log('checkout_signing', { chainName: sourceChainName });
-      const txHash = await signTransaction(signingPayload, sourceChainName);
+      const txHash = await signTransaction(mainPayload, sourceChainName);
 
       // Step 7: Record broadcast
       log('checkout_broadcast', { txHash });
@@ -375,8 +393,11 @@ export async function executeCheckoutFlow(params: {
         (exec, settle) => log('checkout_status', { exec, settle }),
       );
 
-      log('checkout_complete', { txHash: result.txHash, settlementState: result.settlementState });
-      return result;
+      log('checkout_complete', {
+        txHash: result.txHash,
+        settlementState: result.settlementState,
+      });
+      return { ...result, memo };
     } catch (err: any) {
       // 422 = quote expired, retry
       if (err.message?.includes('422') && retries < MAX_QUOTE_RETRIES) {
