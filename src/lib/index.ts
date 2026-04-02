@@ -21,7 +21,11 @@ export {
   getBalances,
 } from './wallet.js';
 export {
+  detectProtocol,
   parsePaymentRequired,
+  parseMppChallenges,
+  handleMppPaywall,
+  handleCoinbasePaywall,
   signPayment,
   submitToFacilitator,
   handlePaywall,

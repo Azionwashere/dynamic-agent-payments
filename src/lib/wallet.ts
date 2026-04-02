@@ -100,13 +100,13 @@ export async function signAndBroadcastTransaction(
 
   // Sign the transaction via Dynamic's server-side MPC
   const signedTx = await client.signTransaction({
-    accountAddress: wallet.accountAddress,
+    senderAddress: wallet.accountAddress,
     transaction: {
       to: txReq.to as `0x${string}`,
       data: txReq.data as `0x${string}` | undefined,
       value: BigInt(txReq.value || '0'),
     },
-  });
+  } as any);
 
   // Broadcast via viem publicClient
   const rpcUrl = config.rpcUrlBase;

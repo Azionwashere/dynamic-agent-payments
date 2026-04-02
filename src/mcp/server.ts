@@ -47,8 +47,9 @@ server.tool(
 
 server.tool(
   'pay_x402',
-  'Pay for an x402-protected service. Pass the base64-encoded PAYMENT-REQUIRED header ' +
-  'from an HTTP 402 response. Signs an EIP-712 payment authorization and settles via the facilitator.',
+  'Pay for an x402-protected service. Supports both protocols: ' +
+  'MPP (pass wwwAuthenticateHeader + url) and Coinbase x402 (pass paymentRequiredHeader). ' +
+  'Signs an EIP-712 payment authorization. For MPP, retries the request with Authorization header.',
   payX402Schema.shape,
   async (input) => {
     const result = await payX402(input as any, emit);

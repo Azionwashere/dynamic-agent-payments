@@ -92,6 +92,12 @@ export interface X402PaymentRequirements {
 export interface X402PaymentResult {
   settlementHash: string;
   accessGranted: boolean;
+  /** MPP only: the Authorization header to retry the request with */
+  authorizationHeader?: string;
+  /** MPP only: the payment ID for tracking */
+  paymentId?: string;
+  /** Which protocol was used */
+  protocol?: 'x402-coinbase' | 'mpp';
 }
 
 export interface WalletInfo {
