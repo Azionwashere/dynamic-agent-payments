@@ -1,20 +1,18 @@
 import { z } from 'zod';
-import { detectProtocol, handleMppPaywall, handleCoinbasePaywall } from '../../lib/x402-handler.js';
+import {
+  detectProtocol,
+  handleMppPaywall,
+  handleCoinbaseX402,
+} from '../../lib/x402-handler.js';
 import type { EventCallback, X402PaymentResult } from '../../lib/types.js';
 import { emitEvent } from '../../lib/events.js';
 
 export const payX402Schema = z.object({
-  url: z.string().optional().describe(
-    'The URL that returned 402. Required for MPP protocol (agent retries the request with Authorization header).'
-  ),
-  paymentRequiredHeader: z.string().optional().describe(
-    'Coinbase x402: the base64-encoded PAYMENT-REQUIRED header value'
-  ),
-  wwwAuthenticateHeader: z.string().optional().describe(
-    'MPP: the full WWW-Authenticate: Payment header value from the 402 response'
-  ),
+  url: z.string().describe('The URL that returned 402 Payment Required'),
+  method: z.enum(['GET', 'POST']).default('GET').describe('HTTP method to use'),
+  body: z.string().optional().describe('Request body for POST requests'),
   memo: z.record(z.unknown()).optional().describe(
-    'Metadata to tag this payment (e.g., { "purpose": "anthropic-credits" })'
+    'Metadata to tag this payment (e.g., { "purpose": "crypto-price-feed" })'
   ),
 });
 
@@ -24,88 +22,95 @@ export async function payX402(
   input: PayX402Input,
   emit?: EventCallback,
 ): Promise<X402PaymentResult & { responseData?: unknown }> {
-  // Auto-detect protocol from provided headers
-  const headers: Record<string, string | undefined> = {};
-  if (input.wwwAuthenticateHeader) headers['www-authenticate'] = input.wwwAuthenticateHeader;
-  if (input.paymentRequiredHeader) headers['payment-required'] = input.paymentRequiredHeader;
-
-  const protocol = detectProtocol(headers);
-
   if (emit) emitEvent(emit, 'x402_start', {
-    protocol,
+    url: input.url,
     ...(input.memo ? { memo: input.memo } : {}),
   });
 
+  // Step 1: Make the request — expect 402
+  const initialRes = await fetch(input.url, {
+    method: input.method,
+    ...(input.body ? { body: input.body, headers: { 'Content-Type': 'application/json' } } : {}),
+  });
+
+  if (initialRes.ok) {
+    // Not a 402 — return the data directly
+    const data = await initialRes.json().catch(() => initialRes.text());
+    return {
+      settlementHash: '',
+      accessGranted: true,
+      protocol: undefined,
+      responseData: data,
+    };
+  }
+
+  if (initialRes.status !== 402) {
+    throw new Error(`Expected 402 Payment Required, got ${initialRes.status}`);
+  }
+
+  // Step 2: Detect protocol from headers and body
+  const headers: Record<string, string> = {};
+  initialRes.headers.forEach((v, k) => { headers[k] = v; });
+
+  const protocol = detectProtocol(headers);
+
+  if (emit) emitEvent(emit, 'x402_detected', {
+    protocol,
+    url: input.url,
+    ...(input.memo ? { memo: input.memo } : {}),
+  });
+
+  // Step 3: Handle based on protocol
+
+  // MPP Protocol (WWW-Authenticate: Payment)
   if (protocol === 'mpp') {
-    // MPP: sign the challenge, then retry the original request
-    const mppResult = await handleMppPaywall(input.wwwAuthenticateHeader!);
-    if (!mppResult) {
-      throw new Error('Failed to parse MPP challenge from WWW-Authenticate header');
-    }
+    const mppResult = await handleMppPaywall(headers['www-authenticate']!);
+    if (!mppResult) throw new Error('Failed to parse MPP challenge');
 
-    // Retry the original request with the Authorization header
-    if (!input.url) {
-      // Can't retry without URL — return the auth header for the caller to use
-      if (emit) emitEvent(emit, 'x402_signed', {
-        protocol: 'mpp',
-        paymentId: mppResult.paymentId,
-        ...(input.memo ? { memo: input.memo } : {}),
-      });
-      return {
-        settlementHash: '',
-        accessGranted: false,
-        authorizationHeader: mppResult.authorizationHeader,
-        paymentId: mppResult.paymentId,
-        protocol: 'mpp',
-      };
-    }
-
-    // Retry the request with payment
     const retryRes = await fetch(input.url, {
+      method: input.method,
       headers: { 'Authorization': mppResult.authorizationHeader },
+      ...(input.body ? { body: input.body } : {}),
     });
 
     const responseData = await retryRes.json().catch(() => retryRes.text());
 
-    // Check for Payment-Receipt header
-    const receiptHeader = retryRes.headers.get('payment-receipt');
-
     if (emit) emitEvent(emit, 'x402_complete', {
       protocol: 'mpp',
       status: retryRes.status,
-      paymentId: mppResult.paymentId,
-      hasReceipt: !!receiptHeader,
+      accessGranted: retryRes.ok,
       ...(input.memo ? { memo: input.memo } : {}),
     });
 
     return {
-      settlementHash: receiptHeader ?? '',
+      settlementHash: retryRes.headers.get('payment-receipt') ?? '',
       accessGranted: retryRes.ok,
-      paymentId: mppResult.paymentId,
       protocol: 'mpp',
       responseData,
     };
   }
 
-  if (protocol === 'x402-coinbase') {
-    const result = await handleCoinbasePaywall(headers);
-    if (!result) {
-      throw new Error(
-        'Failed to parse PAYMENT-REQUIRED header. Ensure it is valid base64-encoded JSON with amount, currency, and recipient.'
-      );
+  // Coinbase x402 Protocol (JSON body with accepts[])
+  if (protocol === 'x402-coinbase' || protocol === 'none') {
+    // Try parsing the response body for x402 payment requirements
+    const body = await initialRes.json().catch(() => null);
+
+    if (body?.accepts?.length > 0) {
+      // Standard Coinbase x402 format
+      const result = await handleCoinbaseX402(input.url, body.accepts[0], input.method, input.body);
+
+      if (emit) emitEvent(emit, 'x402_complete', {
+        protocol: 'x402-coinbase',
+        status: result.accessGranted ? 200 : 402,
+        accessGranted: result.accessGranted,
+        ...(input.memo ? { memo: input.memo } : {}),
+      });
+
+      return { ...result, protocol: 'x402-coinbase' };
     }
-
-    if (emit) emitEvent(emit, 'x402_complete', {
-      protocol: 'x402-coinbase',
-      settlementHash: result.settlementHash,
-      accessGranted: result.accessGranted,
-      ...(input.memo ? { memo: input.memo } : {}),
-    });
-
-    return { ...result, protocol: 'x402-coinbase' };
   }
 
   throw new Error(
-    'No recognized payment protocol. Provide either wwwAuthenticateHeader (MPP) or paymentRequiredHeader (Coinbase x402).'
+    'Unrecognized 402 response format. Expected either WWW-Authenticate: Payment header (MPP) or JSON body with accepts[] (Coinbase x402).'
   );
 }

@@ -26,6 +26,7 @@ export {
   parseMppChallenges,
   handleMppPaywall,
   handleCoinbasePaywall,
+  handleCoinbaseX402,
   signPayment,
   submitToFacilitator,
   handlePaywall,

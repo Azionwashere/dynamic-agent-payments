@@ -324,6 +324,104 @@ export async function handleCoinbasePaywall(
 }
 
 // ============================================================
+// Coinbase x402 v1 Protocol (JSON body with accepts[])
+// ============================================================
+
+export interface X402Accept {
+  scheme: string;
+  network: string;
+  asset: string;
+  payTo: string;
+  maxAmountRequired: string;
+  maxTimeoutSeconds?: number;
+  resource?: string;
+}
+
+/**
+ * Handle Coinbase x402 v1 payment: sign TransferWithAuthorization + retry with X-PAYMENT header.
+ */
+export async function handleCoinbaseX402(
+  url: string,
+  accept: X402Accept,
+  method = 'GET',
+  body?: string,
+): Promise<X402PaymentResult & { responseData?: unknown }> {
+  const walletAddress = await getWalletAddress();
+
+  // Build EIP-712 TransferWithAuthorization typed data
+  // USDC on Base uses domain name "USD Coin", version "2"
+  const nonce = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+  const validAfter = 0;
+  const validBefore = Math.floor(Date.now() / 1000) + (accept.maxTimeoutSeconds ?? 60);
+
+  const typedData = {
+    domain: {
+      name: 'USD Coin',
+      version: '2',
+      chainId: accept.network === 'base' ? 8453 : 1,
+      verifyingContract: accept.asset,
+    },
+    types: {
+      TransferWithAuthorization: [
+        { name: 'from', type: 'address' },
+        { name: 'to', type: 'address' },
+        { name: 'value', type: 'uint256' },
+        { name: 'validAfter', type: 'uint256' },
+        { name: 'validBefore', type: 'uint256' },
+        { name: 'nonce', type: 'bytes32' },
+      ],
+    },
+    primaryType: 'TransferWithAuthorization' as const,
+    message: {
+      from: walletAddress,
+      to: accept.payTo,
+      value: accept.maxAmountRequired,
+      validAfter,
+      validBefore,
+      nonce,
+    },
+  };
+
+  // Sign
+  const signature = await signTypedData(typedData);
+
+  // Build X-PAYMENT header payload
+  const paymentPayload = {
+    x402Version: 1,
+    scheme: accept.scheme,
+    network: accept.network,
+    payload: {
+      signature,
+      authorization: typedData.message,
+    },
+  };
+
+  const xPaymentHeader = Buffer.from(JSON.stringify(paymentPayload)).toString('base64');
+
+  // Retry with payment
+  const retryRes = await fetch(url, {
+    method,
+    headers: {
+      'X-PAYMENT': xPaymentHeader,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(body ? { body } : {}),
+  });
+
+  const responseData = await retryRes.json().catch(() => retryRes.text());
+
+  const xPaymentResponse = retryRes.headers.get('x-payment-response');
+
+  return {
+    settlementHash: xPaymentResponse ?? '',
+    accessGranted: retryRes.ok,
+    protocol: 'x402-coinbase',
+    responseData,
+  };
+}
+
+// ============================================================
 // Unified Handler (auto-detects protocol)
 // ============================================================
 
