@@ -70,11 +70,11 @@ describe('parsePaymentRequired', () => {
     expect(result!.scheme).toBe('exact');
   });
 
-  it('uses facilitator from config when not in header', () => {
+  it('returns empty facilitator when not in header', () => {
     const payload = { amount: '50', currency: 'USDC', recipient: '0xabc' };
     const encoded = Buffer.from(JSON.stringify(payload)).toString('base64');
     const result = parsePaymentRequired({ 'payment-required': encoded });
-    expect(result!.facilitator).toBe('http://localhost:8080');
+    expect(result!.facilitator).toBe('');
   });
 
   it('coerces numeric amount to string', () => {

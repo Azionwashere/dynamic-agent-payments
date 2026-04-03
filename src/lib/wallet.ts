@@ -1,7 +1,5 @@
 import { DynamicEvmWalletClient } from '@dynamic-labs-wallet/node-evm';
 import { ThresholdSignatureScheme } from '@dynamic-labs-wallet/node';
-import { createPublicClient, http } from 'viem';
-import { base, baseSepolia, mainnet } from 'viem/chains';
 import type { SigningPayload, WalletInfo } from './types.js';
 import { loadConfig } from './config.js';
 
@@ -10,13 +8,6 @@ let _authenticated = false;
 
 // Cached wallets: chainId → wallet info
 const walletCache = new Map<string, WalletInfo>();
-
-// Chain ID → viem chain mapping
-const chainMap: Record<string, any> = {
-  '1': mainnet,
-  '8453': base,
-  '84532': baseSepolia,
-};
 
 async function getEvmClient(): Promise<DynamicEvmWalletClient> {
   if (_evmClient && _authenticated) return _evmClient;
@@ -94,37 +85,28 @@ export async function signAndBroadcastTransaction(
 
   const client = await getEvmClient();
   const wallet = await ensureWallet();
-  const config = loadConfig();
 
-  const txReq = payload.transactionRequest ?? payload;
+  const txReq = (payload.transactionRequest ?? payload) as any;
+  const chainId = txReq.chainId?.toString() ?? '8453';
 
-  // Sign the transaction via Dynamic's server-side MPC
-  const signedTx = await client.signTransaction({
-    senderAddress: wallet.accountAddress,
-    transaction: {
-      to: txReq.to as `0x${string}`,
-      data: txReq.data as `0x${string}` | undefined,
-      value: BigInt(txReq.value || '0'),
-    },
-  } as any);
-
-  // Broadcast via viem publicClient
-  const rpcUrl = config.rpcUrlBase;
-  if (!rpcUrl) {
-    throw new Error('RPC_URL_BASE is required to broadcast transactions');
-  }
-
-  // Determine chain from payload or default to Base
-  const chainId = (txReq as any).chainId?.toString() ?? '8453';
-  const chain = chainMap[chainId] ?? base;
-
-  const publicClient = createPublicClient({
-    chain,
-    transport: http(rpcUrl),
+  // Get a viem wallet client from Dynamic — handles RPC internally
+  const walletClient = await (client as any).getWalletClient({
+    accountAddress: wallet.accountAddress,
+    chainId: parseInt(chainId),
+    rpcUrl: `https://${chainId === '8453' ? 'mainnet.base.org' : 'mainnet.base.org'}`,
   });
 
-  const txHash = await publicClient.sendRawTransaction({
-    serializedTransaction: signedTx as `0x${string}`,
+  // Sign and broadcast via Dynamic's wallet client
+  const txHash = await walletClient.sendTransaction({
+    to: txReq.to as `0x${string}`,
+    data: txReq.data as `0x${string}` | undefined,
+    value: BigInt(txReq.value || '0'),
+    gas: txReq.gasLimit ? BigInt(txReq.gasLimit) : undefined,
+    gasPrice: txReq.gasPrice ? BigInt(txReq.gasPrice) : undefined,
+    maxFeePerGas: txReq.maxFeePerGas ? BigInt(txReq.maxFeePerGas) : undefined,
+    maxPriorityFeePerGas: txReq.maxPriorityFeePerGas ? BigInt(txReq.maxPriorityFeePerGas) : undefined,
+    type: txReq.maxFeePerGas ? 'eip1559' as const : 'legacy' as const,
+    chainId: parseInt(chainId),
   });
 
   return txHash;

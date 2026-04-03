@@ -1,6 +1,5 @@
 import type { X402PaymentRequirements, X402PaymentResult } from './types.js';
 import { signTypedData, getWalletAddress } from './wallet.js';
-import { loadConfig } from './config.js';
 
 // ============================================================
 // Protocol Detection
@@ -229,7 +228,7 @@ export function parsePaymentRequired(
       amount: String(parsed.amount),
       currency: parsed.currency,
       recipient: parsed.recipient,
-      facilitator: parsed.facilitator ?? loadConfig().x402FacilitatorUrl,
+      facilitator: parsed.facilitator ?? '',
       chainId: parsed.chainId,
       network: parsed.network,
       scheme: parsed.scheme ?? 'exact',
@@ -312,7 +311,10 @@ export async function handleCoinbasePaywall(
   if (!req) return null;
 
   const signature = await signPayment(req);
-  const facilitatorUrl = req.facilitator ?? loadConfig().x402FacilitatorUrl;
+  if (!req.facilitator) {
+    return null; // No facilitator URL — can't settle
+  }
+  const facilitatorUrl = req.facilitator;
   const result = await submitToFacilitator(facilitatorUrl, req, signature);
 
   return {
