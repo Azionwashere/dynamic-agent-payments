@@ -7,3 +7,6 @@ dist/
 test-*.ts
 .env
 .DS_Store
+
+# Internal docs (not shared)
+.internal/
