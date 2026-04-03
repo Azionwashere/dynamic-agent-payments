@@ -1,72 +1,45 @@
 ---
 name: agent-pay
 description: |
-  Handle x402 paywalls autonomously using Dynamic's Checkout API and delegated MPC wallets.
-  When you encounter an HTTP 402 response with a PAYMENT-REQUIRED header, this skill
-  teaches you how to fund your wallet and pay for the service.
+  Handle x402 paywalls autonomously. When you get an HTTP 402 response,
+  pass the URL and payment header to pay_x402 — it handles everything.
 allowed-tools:
   - Bash
   - Read
 ---
 
-# Agent Payments — x402 + Dynamic Checkout
+# Agent Payments
 
-You have access to an MCP server (`dynamic-agent-payments`) with 4 tools for handling crypto payments.
+You have one payment tool: `pay_x402`.
 
-## When you hit an HTTP 402 response
+## When you hit an HTTP 402
 
-1. Check if the response has a `PAYMENT-REQUIRED` header (base64-encoded JSON). If not, this is a normal 402 — do NOT try to pay.
+If an HTTP request returns 402, check for one of these headers:
+- `WWW-Authenticate: Payment ...` (MPP protocol)
+- `PAYMENT-REQUIRED: ...` (Coinbase x402 protocol)
 
-2. Call `pay_x402` with the header value:
-   ```
-   pay_x402({ paymentRequiredHeader: "<the base64 value>" })
-   ```
+If either is present, call `pay_x402`:
 
-3. If `pay_x402` fails with "insufficient balance":
-   - Call `check_balance` to see what tokens you have and where
-   - Call `fund_agent` to swap/bridge tokens to the required chain
-   - Retry `pay_x402`
-
-4. After successful payment, retry the original HTTP request with the payment signature.
-
-## Tools
-
-### check_balance
-Check wallet balance on a specific chain.
-```json
-{ "chain": "EVM", "chainId": "8453", "tokenAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" }
-```
-
-### fund_agent
-Fund the agent wallet by swapping/bridging tokens cross-chain.
+**For MPP (WWW-Authenticate):**
 ```json
 {
-  "fromChainId": "1",
-  "fromChainName": "EVM",
-  "fromTokenAddress": "0x0000000000000000000000000000000000000000",
-  "toChainId": "8453",
-  "toChainName": "EVM",
-  "toTokenSymbol": "USDC",
-  "toTokenAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-  "toTokenDecimals": 6,
-  "amountUsd": "5.00"
+  "url": "https://the-url-that-returned-402",
+  "wwwAuthenticateHeader": "<full WWW-Authenticate header value>",
+  "memo": { "purpose": "what this payment is for" }
 }
 ```
 
-### pay_x402
-Pay for an x402-protected service.
+**For Coinbase x402 (PAYMENT-REQUIRED):**
 ```json
-{ "paymentRequiredHeader": "<base64-encoded PAYMENT-REQUIRED header value>" }
+{
+  "paymentRequiredHeader": "<the PAYMENT-REQUIRED header value>",
+  "memo": { "purpose": "what this payment is for" }
+}
 ```
 
-### get_transaction_status
-Check status of a funding transaction.
-```json
-{ "transactionId": "ctx_xyz789..." }
-```
+The tool handles everything: checks balance, swaps tokens if needed, signs the payment, and retries the request.
 
 ## Important
 
-- Do NOT attempt to pay for non-x402 402 responses (ones without PAYMENT-REQUIRED header)
-- Fund in reasonable amounts ($5-10 minimum) to avoid paying bridge fees for sub-dollar payments
-- The agent wallet uses delegated MPC signing — no private keys are held locally
+- Only pay for requests that have a `WWW-Authenticate: Payment` or `PAYMENT-REQUIRED` header. Do NOT try to pay for regular 402 responses.
+- Always include a `memo` describing what the payment is for — it appears in the activity dashboard.
