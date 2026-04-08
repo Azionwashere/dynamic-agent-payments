@@ -35,7 +35,9 @@ export async function payX402(
 
   if (initialRes.ok) {
     // Not a 402 — return the data directly
-    const data = await initialRes.json().catch(() => initialRes.text());
+    const rawText = await initialRes.text();
+    let data: unknown;
+    try { data = JSON.parse(rawText); } catch { data = rawText; }
     return {
       settlementHash: '',
       accessGranted: true,
@@ -73,7 +75,9 @@ export async function payX402(
       ...(input.body ? { body: input.body } : {}),
     });
 
-    const responseData = await retryRes.json().catch(() => retryRes.text());
+    const retryText = await retryRes.text();
+    let responseData: unknown;
+    try { responseData = JSON.parse(retryText); } catch { responseData = retryText; }
 
     if (emit) emitEvent(emit, 'x402_complete', {
       protocol: 'mpp',

@@ -2,7 +2,7 @@
 
 **Your AI agent can pay for services with any token, on any chain.**
 
-Most x402 services demand USDC on Base. Your agent has ETH on Ethereum. Or SOL on Solana. Or MATIC on Polygon. With Dynamic Agent Payments, that doesn't matter — the agent automatically swaps and bridges to whatever the merchant needs, then pays. One tool, fully autonomous.
+Most x402 services demand USDC on Base. Your agent has ETH on Ethereum. Or SOL on Solana. Or MATIC on Polygon. With Dynamic Agent Payments, that doesn't matter — the agent automatically swaps and bridges to whatever the merchant needs, then pays. One CLI command, fully autonomous.
 
 ## The Problem
 
@@ -50,6 +50,55 @@ DYNAMIC_AUTH_TOKEN=dyn_your-token
 
 Get these from [app.dynamic.xyz](https://app.dynamic.xyz).
 
+## CLI Usage
+
+```bash
+# Pay for an x402-protected resource
+npx dynamic-agent-payments pay https://x402-api.fly.dev/api/price-feed
+
+# Pay with metadata
+npx dynamic-agent-payments pay https://api.example.com/data --memo '{"purpose":"price-feed"}'
+
+# POST with body
+npx dynamic-agent-payments pay https://api.example.com/query --method POST --body '{"q":"BTC"}'
+
+# Check wallet balances
+npx dynamic-agent-payments balance
+npx dynamic-agent-payments balance --chain SOL
+
+# Fund agent wallet (swap/bridge via Checkout)
+npx dynamic-agent-payments fund \
+  --amount 5.00 \
+  --from-chain-id 1 --from-chain-name EVM --from-token 0x0000000000000000000000000000000000000000 \
+  --to-chain-id 8453 --to-chain-name EVM --to-token-address 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+
+# Check transaction status
+npx dynamic-agent-payments status tx_abc123
+```
+
+All commands output JSON to stdout and status messages to stderr, so they're pipeable:
+```bash
+npx dynamic-agent-payments balance | jq '.balances[] | select(.symbol == "USDC")'
+```
+
+## How It Works
+
+**One command: `pay`**
+
+The agent passes a URL. The CLI handles everything:
+
+1. **Hits the URL** — gets the 402 payment requirements
+2. **Checks the wallet** — does the agent have the right token?
+3. **Swaps if needed** — uses Dynamic's Checkout API to convert any token → the required token, across any chain
+4. **Signs the payment** — EIP-712 via Dynamic's MPC wallet (no private keys stored locally)
+5. **Retries the request** — submits proof of payment, returns the data
+
+The agent's wallet is created automatically on first use. Fund it with any token on any chain — the Checkout API handles the rest.
+
+## Claude Code Integration (MCP)
+
+For Claude Code users, this also ships as an MCP server:
+
 Add to Claude Code settings (`~/.claude/settings.json`):
 ```json
 {
@@ -63,26 +112,12 @@ Add to Claude Code settings (`~/.claude/settings.json`):
 }
 ```
 
-Install the skill:
+Install the skill for auto-triggering on 402 responses:
 ```bash
 cp -r skill/ ~/.claude/skills/agent-pay/
 ```
 
-Restart Claude Code. Your agent can now pay for x402 services.
-
-## How It Works
-
-**One MCP tool: `pay_x402`**
-
-The agent passes a URL. The tool handles everything:
-
-1. **Hits the URL** — gets the 402 payment requirements
-2. **Checks the wallet** — does the agent have the right token?
-3. **Swaps if needed** — uses Dynamic's Checkout API to convert any token → the required token, across any chain
-4. **Signs the payment** — EIP-712 via Dynamic's MPC wallet (no private keys stored locally)
-5. **Retries the request** — submits proof of payment, returns the data
-
-The agent's wallet is created automatically on first use. Fund it with any token on any chain — the Checkout API handles the rest.
+Restart Claude Code. Your agent can now pay for x402 services automatically.
 
 ## Supported Chains & Tokens
 
@@ -123,8 +158,10 @@ Shows every step: paywall detection → balance check → swap → signing → p
 ## Development
 
 ```bash
+npm run build      # Compile
+npm run cli        # Run CLI
+npm run mcp        # Run MCP server
 npm run dev        # Watch mode
 npm run test       # 42 tests passing
-npm run build      # Compile
 npm run dashboard  # Activity feed UI
 ```

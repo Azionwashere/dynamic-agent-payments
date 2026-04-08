@@ -352,8 +352,8 @@ export async function handleCoinbaseX402(
   // USDC on Base uses domain name "USD Coin", version "2"
   const nonce = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
     .map(b => b.toString(16).padStart(2, '0')).join('');
-  const validAfter = 0;
-  const validBefore = Math.floor(Date.now() / 1000) + (accept.maxTimeoutSeconds ?? 60);
+  const validAfter = '0';
+  const validBefore = String(Math.floor(Date.now() / 1000) + (accept.maxTimeoutSeconds ?? 60));
 
   const typedData = {
     domain: {
@@ -409,7 +409,9 @@ export async function handleCoinbaseX402(
     ...(body ? { body } : {}),
   });
 
-  const responseData = await retryRes.json().catch(() => retryRes.text());
+  const responseText = await retryRes.text();
+  let responseData: unknown;
+  try { responseData = JSON.parse(responseText); } catch { responseData = responseText; }
 
   const xPaymentResponse = retryRes.headers.get('x-payment-response');
 

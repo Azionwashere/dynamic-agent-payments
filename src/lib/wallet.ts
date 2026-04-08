@@ -137,15 +137,14 @@ export async function getBalances(
 ): Promise<Array<{ symbol: string; balance: string; tokenAddress: string }>> {
   const config = loadConfig();
 
+  const params = new URLSearchParams({ accountAddress });
+  if (networkId) params.set('networkId', networkId);
+
   const res = await fetch(
-    `${config.checkoutApiBase}/sdk/${config.dynamicEnvironmentId}/chains/${chainName}/balances`,
+    `${config.checkoutApiBase}/sdk/${config.dynamicEnvironmentId}/chains/${chainName}/balances?${params}`,
     {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-account-address': accountAddress,
-        ...(networkId ? { 'x-network-id': networkId } : {}),
-      },
+      headers: { 'Content-Type': 'application/json' },
     },
   );
 

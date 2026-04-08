@@ -1,17 +1,19 @@
 {
   "name": "dynamic-agent-payments",
   "version": "0.1.0",
-  "description": "MCP server + library for AI agents to handle x402 paywalls via Dynamic's Checkout API and delegated MPC wallets",
+  "description": "CLI + library for AI agents to handle x402 paywalls via Dynamic's Checkout API and delegated MPC wallets",
   "type": "module",
   "main": "dist/lib/index.js",
   "bin": {
-    "dynamic-agent-payments": "dist/mcp/server.js"
+    "dynamic-agent-payments": "dist/cli.js",
+    "dynamic-agent-payments-mcp": "dist/mcp/server.js"
   },
   "scripts": {
     "build": "tsc && cp src/dashboard/index.html dist/dashboard/index.html",
     "dev": "tsc --watch",
     "test": "vitest",
     "test:run": "vitest run",
+    "cli": "node dist/cli.js",
     "mcp": "node dist/mcp/server.js",
     "dashboard": "node dist/dashboard/server.js"
   },
