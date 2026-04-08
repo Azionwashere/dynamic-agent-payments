@@ -1,27 +1,43 @@
 import { DynamicEvmWalletClient } from '@dynamic-labs-wallet/node-evm';
+import { DynamicSvmWalletClient } from '@dynamic-labs-wallet/node-svm';
 import { ThresholdSignatureScheme } from '@dynamic-labs-wallet/node';
 import type { SigningPayload, WalletInfo } from './types.js';
 import { loadConfig } from './config.js';
 
-let _evmClient: DynamicEvmWalletClient | null = null;
-let _authenticated = false;
+type ChainFamily = 'EVM' | 'SOL';
 
-// Cached wallets: chainId → wallet info
+let _evmClient: DynamicEvmWalletClient | null = null;
+let _svmClient: DynamicSvmWalletClient | null = null;
+let _evmAuthenticated = false;
+let _svmAuthenticated = false;
+
+// Cached wallets: chain family → wallet info
 const walletCache = new Map<string, WalletInfo>();
 
 async function getEvmClient(): Promise<DynamicEvmWalletClient> {
-  if (_evmClient && _authenticated) return _evmClient;
+  if (_evmClient && _evmAuthenticated) return _evmClient;
   const config = loadConfig();
   _evmClient = new DynamicEvmWalletClient({
     environmentId: config.dynamicEnvironmentId,
   });
   await _evmClient.authenticateApiToken(config.dynamicAuthToken);
-  _authenticated = true;
+  _evmAuthenticated = true;
   return _evmClient;
 }
 
+async function getSvmClient(): Promise<DynamicSvmWalletClient> {
+  if (_svmClient && _svmAuthenticated) return _svmClient;
+  const config = loadConfig();
+  _svmClient = new DynamicSvmWalletClient({
+    environmentId: config.dynamicEnvironmentId,
+  });
+  await _svmClient.authenticateApiToken(config.dynamicAuthToken);
+  _svmAuthenticated = true;
+  return _svmClient;
+}
+
 /**
- * Create a new EVM wallet on a specific chain.
+ * Create a new EVM wallet.
  */
 export async function createEvmWallet(): Promise<WalletInfo> {
   const client = await getEvmClient();
@@ -29,46 +45,60 @@ export async function createEvmWallet(): Promise<WalletInfo> {
     thresholdSignatureScheme: ThresholdSignatureScheme.TWO_OF_TWO,
     backUpToClientShareService: true,
   });
-  const info: WalletInfo = {
-    accountAddress: result.accountAddress,
-    walletId: result.walletId,
-    chain: 'EVM',
-  };
-  return info;
+  return { accountAddress: result.accountAddress, walletId: result.walletId, chain: 'EVM' };
 }
 
 /**
- * Ensure a wallet exists. If we have one cached, use it. Otherwise create one.
- * A single EVM wallet works across all EVM chains (same address).
+ * Create a new SOL wallet.
  */
-export async function ensureWallet(): Promise<WalletInfo> {
-  const cached = walletCache.get('evm');
+export async function createSvmWallet(): Promise<WalletInfo> {
+  const client = await getSvmClient();
+  const result = await (client as any).createWalletAccount({
+    thresholdSignatureScheme: ThresholdSignatureScheme.TWO_OF_TWO,
+    backUpToClientShareService: true,
+  });
+  return { accountAddress: result.accountAddress, walletId: result.walletId, chain: 'SOL' };
+}
+
+/**
+ * Ensure a wallet exists for the given chain family.
+ * Checks cache, then env vars, then creates a new one.
+ */
+export async function ensureWallet(chain: ChainFamily = 'EVM'): Promise<WalletInfo> {
+  const cacheKey = chain.toLowerCase();
+  const cached = walletCache.get(cacheKey);
   if (cached) return cached;
 
-  // Check if wallet address is provided via env
-  const envAddress = process.env.WALLET_ADDRESS;
-  const envWalletId = process.env.WALLET_ID;
-  if (envAddress && envWalletId) {
-    const info: WalletInfo = {
-      accountAddress: envAddress,
-      walletId: envWalletId,
-      chain: 'EVM',
-    };
-    walletCache.set('evm', info);
-    return info;
+  // Check env vars
+  if (chain === 'EVM') {
+    const addr = process.env.WALLET_ADDRESS;
+    const id = process.env.WALLET_ID;
+    if (addr && id) {
+      const info: WalletInfo = { accountAddress: addr, walletId: id, chain: 'EVM' };
+      walletCache.set(cacheKey, info);
+      return info;
+    }
+  } else if (chain === 'SOL') {
+    const addr = process.env.SOL_WALLET_ADDRESS;
+    const id = process.env.SOL_WALLET_ID;
+    if (addr && id) {
+      const info: WalletInfo = { accountAddress: addr, walletId: id, chain: 'SOL' };
+      walletCache.set(cacheKey, info);
+      return info;
+    }
   }
 
   // Create a new wallet
-  const info = await createEvmWallet();
-  walletCache.set('evm', info);
+  const info = chain === 'SOL' ? await createSvmWallet() : await createEvmWallet();
+  walletCache.set(cacheKey, info);
   return info;
 }
 
 /**
- * Get the wallet address (creates wallet if needed).
+ * Get the wallet address for a chain family (creates wallet if needed).
  */
-export async function getWalletAddress(): Promise<string> {
-  const wallet = await ensureWallet();
+export async function getWalletAddress(chain: ChainFamily = 'EVM'): Promise<string> {
+  const wallet = await ensureWallet(chain);
   return wallet.accountAddress;
 }
 

@@ -39,7 +39,8 @@ export async function fundAgent(
     ...(input.memo ? { memo: input.memo } : {}),
   });
 
-  const walletAddress = await getWalletAddress();
+  const sourceAddress = await getWalletAddress(fromChainName);
+  const destAddress = await getWalletAddress(toChainName);
 
   // Get or create checkout for this destination chain
   const cacheKey = `${input.toChainId}-${input.toTokenAddress}`;
@@ -56,7 +57,7 @@ export async function fundAgent(
       settlementTokenAddress: input.toTokenAddress,
       settlementTokenSymbol: input.toTokenSymbol,
       settlementTokenDecimals: input.toTokenDecimals,
-      destinationAddress: walletAddress,
+      destinationAddress: destAddress,
     });
     checkoutCache.set(cacheKey, checkoutId);
   }
@@ -67,7 +68,7 @@ export async function fundAgent(
     environmentId: config.dynamicEnvironmentId,
     checkoutId,
     amountUsd: input.amountUsd,
-    sourceAddress: walletAddress,
+    sourceAddress,
     sourceChainId: input.fromChainId,
     sourceChainName: fromChainName,
     fromTokenAddress: input.fromTokenAddress,

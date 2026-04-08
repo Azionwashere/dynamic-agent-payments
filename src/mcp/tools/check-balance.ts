@@ -16,7 +16,7 @@ export async function checkBalance(
 ): Promise<{ address: string; chain: string; balances: Array<{ symbol: string; balance: string; tokenAddress: string }> }> {
   if (emit) emitEvent(emit, 'check_balance_start', { chain: input.chain });
 
-  const address = await getWalletAddress();
+  const address = await getWalletAddress(input.chain as 'EVM' | 'SOL');
   const balances = await getBalances(input.chain, address, input.networkId);
 
   if (emit) emitEvent(emit, 'check_balance_complete', {
