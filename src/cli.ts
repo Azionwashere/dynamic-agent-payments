@@ -16,6 +16,7 @@ Commands:
   balance            Check agent wallet balances
   fund               Fund agent wallet via checkout swap/bridge
   status <txId>      Check transaction status
+  dashboard          Open live activity dashboard
 
 Run any command with --help for details.
 `.trim();
@@ -231,10 +232,11 @@ async function main() {
   }
 
   switch (command) {
-    case 'pay':     await cmdPay(rest); break;
-    case 'balance': await cmdBalance(rest); break;
-    case 'fund':    await cmdFund(rest); break;
-    case 'status':  await cmdStatus(rest); break;
+    case 'pay':       await cmdPay(rest); break;
+    case 'balance':   await cmdBalance(rest); break;
+    case 'fund':      await cmdFund(rest); break;
+    case 'status':    await cmdStatus(rest); break;
+    case 'dashboard': await import('./dashboard/server.js'); break;
     default:
       console.error(`Unknown command: ${command}\n`);
       console.error(USAGE);
