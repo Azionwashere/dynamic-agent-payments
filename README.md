@@ -56,30 +56,24 @@ Get these from [app.dynamic.xyz](https://app.dynamic.xyz).
 # Pay for an x402-protected resource
 npx dynamic-agent-payments pay https://x402-api.fly.dev/api/price-feed
 
-# Pay with metadata
-npx dynamic-agent-payments pay https://api.example.com/data --memo '{"purpose":"price-feed"}'
-
-# POST with body
-npx dynamic-agent-payments pay https://api.example.com/query --method POST --body '{"q":"BTC"}'
-
 # Check wallet balances
 npx dynamic-agent-payments balance
-npx dynamic-agent-payments balance --chain SOL
 
-# Fund agent wallet (swap/bridge via Checkout)
-npx dynamic-agent-payments fund \
-  --amount 5.00 \
-  --from-chain-id 1 --from-chain-name EVM --from-token 0x0000000000000000000000000000000000000000 \
-  --to-chain-id 8453 --to-chain-name EVM --to-token-address 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+# Fund agent wallet (swap ETH on Ethereum → USDC on Base)
+npx dynamic-agent-payments fund --amount 5.00 \
+  --from-chain-id 1 --from-token 0x0000...0000 \
+  --to-chain-id 8453 --to-token-address 0x8335...2913
 
 # Check transaction status
 npx dynamic-agent-payments status tx_abc123
 ```
 
-All commands output JSON to stdout and status messages to stderr, so they're pipeable:
+All commands output JSON to stdout and status to stderr, so they're pipeable:
 ```bash
-npx dynamic-agent-payments balance | jq '.balances[] | select(.symbol == "USDC")'
+npx dynamic-agent-payments pay https://x402-api.fly.dev/api/price-feed 2>/dev/null | jq '.responseData.data'
 ```
+
+Run any command with `--help` for all options.
 
 ## How It Works
 

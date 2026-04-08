@@ -1,16 +1,16 @@
 import { z } from 'zod';
 import { executeCheckoutFlow, createCheckout } from '../../lib/checkout-client.js';
 import { signAndBroadcastTransaction, getWalletAddress } from '../../lib/wallet.js';
-import { loadConfig } from '../../lib/config.js';
+import { loadConfig, chainFamily } from '../../lib/config.js';
 import type { EventCallback, SettlementResult } from '../../lib/types.js';
 import { emitEvent } from '../../lib/events.js';
 
 export const fundAgentSchema = z.object({
   fromChainId: z.string().describe('Source chain ID (e.g., "1" for Ethereum, "101" for Solana)'),
-  fromChainName: z.enum(['EVM', 'SOL']).describe('Source chain family'),
+  fromChainName: z.enum(['EVM', 'SOL']).optional().describe('Source chain family (inferred from chain ID if omitted)'),
   fromTokenAddress: z.string().describe('Token to pay from. Use 0x0000...0000 for EVM native.'),
   toChainId: z.string().describe('Target chain ID (e.g., "8453" for Base)'),
-  toChainName: z.enum(['EVM', 'SOL']).describe('Target chain family'),
+  toChainName: z.enum(['EVM', 'SOL']).optional().describe('Target chain family (inferred from chain ID if omitted)'),
   toTokenSymbol: z.string().default('USDC').describe('Token to receive'),
   toTokenAddress: z.string().describe('Settlement token contract address'),
   toTokenDecimals: z.number().default(6).describe('Settlement token decimals'),
@@ -29,10 +29,12 @@ export async function fundAgent(
   emit?: EventCallback,
 ): Promise<SettlementResult> {
   const config = loadConfig();
+  const fromChainName = input.fromChainName ?? chainFamily(input.fromChainId);
+  const toChainName = input.toChainName ?? chainFamily(input.toChainId);
 
   if (emit) emitEvent(emit, 'fund_start', {
-    fromChain: input.fromChainName,
-    toChain: input.toChainName,
+    fromChain: fromChainName,
+    toChain: toChainName,
     amountUsd: input.amountUsd,
     ...(input.memo ? { memo: input.memo } : {}),
   });
@@ -44,13 +46,13 @@ export async function fundAgent(
   let checkoutId = checkoutCache.get(cacheKey);
 
   if (!checkoutId) {
-    if (emit) emitEvent(emit, 'fund_creating_checkout', { toChain: input.toChainName });
+    if (emit) emitEvent(emit, 'fund_creating_checkout', { toChain: toChainName });
     checkoutId = await createCheckout({
       environmentId: config.dynamicEnvironmentId,
       apiToken: config.dynamicAuthToken,
       apiBase: config.checkoutApiBase,
       settlementChainId: input.toChainId,
-      settlementChainName: input.toChainName,
+      settlementChainName: toChainName,
       settlementTokenAddress: input.toTokenAddress,
       settlementTokenSymbol: input.toTokenSymbol,
       settlementTokenDecimals: input.toTokenDecimals,
@@ -67,7 +69,7 @@ export async function fundAgent(
     amountUsd: input.amountUsd,
     sourceAddress: walletAddress,
     sourceChainId: input.fromChainId,
-    sourceChainName: input.fromChainName,
+    sourceChainName: fromChainName,
     fromTokenAddress: input.fromTokenAddress,
     signTransaction: signAndBroadcastTransaction,
     slippage: input.slippage,

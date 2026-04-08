@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 import { parseArgs } from 'node:util';
-import { loadConfig } from './lib/config.js';
+import { loadConfig, chainFamily } from './lib/config.js';
 import { createEventEmitter } from './lib/events.js';
 import { payX402 } from './mcp/tools/pay-x402.js';
 import { checkBalance } from './mcp/tools/check-balance.js';
@@ -49,14 +49,14 @@ Fund the agent wallet by swapping/bridging tokens via Dynamic Checkout.
 
 Required:
   --amount             Amount in USD
-  --from-chain-id      Source chain ID (e.g. "1" for Ethereum)
-  --from-chain-name    Source chain family: EVM or SOL
+  --from-chain-id      Source chain ID (e.g. "1" for Ethereum, "101" for Solana)
   --from-token         Source token address (0x0000...0000 for native)
   --to-chain-id        Destination chain ID (e.g. "8453" for Base)
-  --to-chain-name      Destination chain family: EVM or SOL
   --to-token-address   Settlement token contract address
 
 Optional:
+  --from-chain-name    Override source chain family (default: inferred from chain ID)
+  --to-chain-name      Override destination chain family (default: inferred from chain ID)
   --to-token-symbol    Settlement token symbol (default: USDC)
   --to-token-decimals  Settlement token decimals (default: 6)
   --slippage           Slippage tolerance as decimal (e.g. 0.005 for 0.5%)
@@ -165,13 +165,18 @@ async function cmdFund(argv: string[]) {
 
   if (values.help) { console.error(FUND_USAGE); process.exit(0); }
 
-  const required = ['amount', 'from-chain-id', 'from-chain-name', 'from-token', 'to-chain-id', 'to-chain-name', 'to-token-address'] as const;
+  const required = ['amount', 'from-chain-id', 'from-token', 'to-chain-id', 'to-token-address'] as const;
   for (const key of required) {
     if (!values[key]) fatal(`Missing required --${key}. Run with --help for usage.`);
   }
 
-  const fromChainName = values['from-chain-name']!.toUpperCase() as 'EVM' | 'SOL';
-  const toChainName = values['to-chain-name']!.toUpperCase() as 'EVM' | 'SOL';
+  const fromChainName = values['from-chain-name']
+    ? values['from-chain-name'].toUpperCase() as 'EVM' | 'SOL'
+    : chainFamily(values['from-chain-id']!);
+  const toChainName = values['to-chain-name']
+    ? values['to-chain-name'].toUpperCase() as 'EVM' | 'SOL'
+    : chainFamily(values['to-chain-id']!);
+
   if (fromChainName !== 'EVM' && fromChainName !== 'SOL') fatal('--from-chain-name must be EVM or SOL');
   if (toChainName !== 'EVM' && toChainName !== 'SOL') fatal('--to-chain-name must be EVM or SOL');
 

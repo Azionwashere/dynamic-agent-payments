@@ -1,4 +1,4 @@
-export { loadConfig, resetConfig } from './config.js';
+export { loadConfig, resetConfig, chainFamily } from './config.js';
 export { createEventEmitter, emitEvent } from './events.js';
 export {
   createCheckout,

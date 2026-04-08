@@ -33,3 +33,10 @@ export function loadConfig(): Config {
 export function resetConfig(): void {
   _config = null;
 }
+
+/** Map chain ID to Dynamic chain family (EVM or SOL). */
+const SVM_CHAIN_IDS = new Set(['101', '102', '103']); // mainnet, testnet, devnet
+
+export function chainFamily(chainId: string): 'EVM' | 'SOL' {
+  return SVM_CHAIN_IDS.has(chainId) ? 'SOL' : 'EVM';
+}
