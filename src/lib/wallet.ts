@@ -39,7 +39,7 @@ export async function createEvmWallet(): Promise<WalletInfo> {
 
 /**
  * Ensure a wallet exists. If we have one cached, use it. Otherwise create one.
- * For v1, a single EVM wallet works across all EVM chains (same address).
+ * A single EVM wallet works across all EVM chains (same address).
  */
 export async function ensureWallet(): Promise<WalletInfo> {
   const cached = walletCache.get('evm');
@@ -80,7 +80,7 @@ export async function signAndBroadcastTransaction(
   chainName: string,
 ): Promise<string> {
   if (chainName !== 'EVM') {
-    throw new Error(`Chain ${chainName} signing not yet supported. Use EVM for v1.`);
+    throw new Error(`Chain ${chainName} signing not yet supported. Currently EVM only.`);
   }
 
   const client = await getEvmClient();

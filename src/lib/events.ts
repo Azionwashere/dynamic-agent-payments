@@ -11,7 +11,7 @@ export function createEventEmitter(): EventCallback {
     try {
       appendFileSync(getEventFile(), line);
     } catch {
-      // Dashboard is optional — don't crash the MCP server
+      // Dashboard is optional — don't crash on write errors
     }
   };
 }
