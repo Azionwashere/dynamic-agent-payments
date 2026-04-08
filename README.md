@@ -53,8 +53,11 @@ Get these from [app.dynamic.xyz](https://app.dynamic.xyz).
 ## CLI Usage
 
 ```bash
-# Pay for an x402-protected resource
+# Pay for a Coinbase x402-protected resource
 npx dynamic-agent-payments pay https://x402-api.fly.dev/api/price-feed
+
+# Pay for an MPP-protected resource (Stripe, custom MPP servers)
+npx dynamic-agent-payments pay-mpp https://api.example.com/resource
 
 # Check wallet balances
 npx dynamic-agent-payments balance
@@ -66,6 +69,9 @@ npx dynamic-agent-payments fund --amount 5.00 \
 
 # Check transaction status
 npx dynamic-agent-payments status tx_abc123
+
+# Live activity dashboard
+npx dynamic-agent-payments dashboard
 ```
 
 All commands output JSON to stdout and status to stderr, so they're pipeable:
@@ -119,7 +125,9 @@ Restart Claude Code. Your agent can now pay for x402 services automatically.
 
 **Settlement (what merchants accept):** Routed automatically via Dynamic's Checkout API — cheapest, fastest, or preferred order
 
-**Payment Protocols:** Coinbase x402, MPP (HTTP Payment Authentication Scheme)
+**Payment Protocols:**
+- **Coinbase x402** — `pay` command (TransferWithAuthorization on Base)
+- **MPP** — `pay-mpp` command (EIP-712 methods: transferwithauth, permit, opdata)
 
 ## Why Dynamic
 

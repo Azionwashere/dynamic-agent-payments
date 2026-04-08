@@ -7,12 +7,15 @@ import { payX402 } from './mcp/tools/pay-x402.js';
 import { checkBalance } from './mcp/tools/check-balance.js';
 import { fundAgent } from './mcp/tools/fund-agent.js';
 import { getTxStatus } from './mcp/tools/tx-status.js';
+import { detectProtocol, parseMppChallenges, selectChallenge, handleMppPaywall } from './lib/x402-handler.js';
+import { emitEvent } from './lib/events.js';
 
 const USAGE = `
 dynamic-agent-payments — CLI for x402 payments via Dynamic wallets
 
 Commands:
-  pay <url>          Pay for an x402-protected resource
+  pay <url>          Pay for a Coinbase x402-protected resource
+  pay-mpp <url>      Pay for an MPP-protected resource
   balance            Check agent wallet balances
   fund               Fund agent wallet via checkout swap/bridge
   status <txId>      Check transaction status
@@ -24,13 +27,28 @@ Run any command with --help for details.
 const PAY_USAGE = `
 Usage: dynamic-agent-payments pay <url> [options]
 
-Hit a URL. If it returns 402, detect the protocol (MPP or Coinbase x402),
-sign the payment via Dynamic MPC wallet, and retry.
+Pay for a Coinbase x402-protected resource. Handles the full flow:
+detect x402 payment requirements, sign via Dynamic wallet, retry.
 
 Options:
   --method   HTTP method (GET or POST, default: GET)
   --body     Request body for POST (JSON string)
   --memo     Payment metadata (JSON string, e.g. '{"purpose":"price-feed"}')
+`.trim();
+
+const PAY_MPP_USAGE = `
+Usage: dynamic-agent-payments pay-mpp <url> [options]
+
+Pay for an MPP-protected resource (RFC draft-httpauth-payment).
+Handles the full flow: parse WWW-Authenticate: Payment challenge,
+sign via Dynamic wallet, retry with Authorization: Payment credential.
+
+Currently supports EIP-712 methods (transferwithauth, permit, opdata).
+Tempo and Solana methods coming when Dynamic Node SDK adds support.
+
+Options:
+  --method   HTTP method (GET or POST, default: GET)
+  --body     Request body for POST (JSON string)
 `.trim();
 
 const BALANCE_USAGE = `
@@ -116,6 +134,98 @@ async function cmdPay(argv: string[]) {
   }, emit);
 
   console.log(JSON.stringify(result, null, 2));
+}
+
+async function cmdPayMpp(argv: string[]) {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      help: { type: 'boolean', short: 'h' },
+      method: { type: 'string', short: 'm' },
+      body: { type: 'string', short: 'b' },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help) { console.error(PAY_MPP_USAGE); process.exit(0); }
+
+  const url = positionals[0];
+  if (!url) fatal('Missing URL. Usage: dynamic-agent-payments pay-mpp <url>');
+
+  const method = (values.method?.toUpperCase() ?? 'GET') as 'GET' | 'POST';
+  if (method !== 'GET' && method !== 'POST') fatal('--method must be GET or POST');
+
+  loadConfig();
+  const emit = createEventEmitter();
+  console.error(`Requesting ${url}...`);
+
+  // Step 1: Make the initial request — expect 402
+  const initialRes = await fetch(url, {
+    method,
+    ...(values.body ? { body: values.body, headers: { 'Content-Type': 'application/json' } } : {}),
+  });
+
+  if (initialRes.ok) {
+    const responseText = await initialRes.text();
+    let data: unknown;
+    try { data = JSON.parse(responseText); } catch { data = responseText; }
+    console.log(JSON.stringify({ accessGranted: true, protocol: 'mpp', responseData: data }, null, 2));
+    return;
+  }
+
+  if (initialRes.status !== 402) {
+    fatal(`Expected 402 Payment Required, got ${initialRes.status}`);
+  }
+
+  // Step 2: Check for WWW-Authenticate: Payment header
+  const wwwAuth = initialRes.headers.get('www-authenticate');
+  if (!wwwAuth || !wwwAuth.includes('Payment ')) {
+    fatal('Server returned 402 but no WWW-Authenticate: Payment header. This is not an MPP endpoint — try "pay" for Coinbase x402.');
+  }
+
+  emitEvent(emit, 'mpp_challenge_received', { url });
+  console.error('MPP challenge received, signing...');
+
+  // Step 3: Parse, sign, build credential
+  const result = await handleMppPaywall(wwwAuth);
+  if (!result) fatal('Failed to handle MPP challenge — no supported payment method found.');
+
+  emitEvent(emit, 'mpp_credential_built', { method: result.challenge.method });
+  console.error(`Retrying with ${result.challenge.method} credential...`);
+
+  // Step 4: Retry with Authorization: Payment credential
+  const retryRes = await fetch(url, {
+    method,
+    headers: {
+      'Authorization': result.authorizationHeader,
+      ...(values.body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(values.body ? { body: values.body } : {}),
+  });
+
+  const responseText = await retryRes.text();
+  let responseData: unknown;
+  try { responseData = JSON.parse(responseText); } catch { responseData = responseText; }
+
+  const receipt = retryRes.headers.get('payment-receipt');
+  let parsedReceipt: unknown = receipt;
+  if (receipt) {
+    try { parsedReceipt = JSON.parse(Buffer.from(receipt, 'base64url').toString('utf-8')); } catch { /* keep raw */ }
+  }
+
+  emitEvent(emit, 'mpp_complete', {
+    status: retryRes.status,
+    accessGranted: retryRes.ok,
+    method: result.challenge.method,
+  });
+
+  console.log(JSON.stringify({
+    accessGranted: retryRes.ok,
+    protocol: 'mpp',
+    method: result.challenge.method,
+    receipt: parsedReceipt ?? null,
+    responseData,
+  }, null, 2));
 }
 
 async function cmdBalance(argv: string[]) {
@@ -233,6 +343,7 @@ async function main() {
 
   switch (command) {
     case 'pay':       await cmdPay(rest); break;
+    case 'pay-mpp':   await cmdPayMpp(rest); break;
     case 'balance':   await cmdBalance(rest); break;
     case 'fund':      await cmdFund(rest); break;
     case 'status':    await cmdStatus(rest); break;

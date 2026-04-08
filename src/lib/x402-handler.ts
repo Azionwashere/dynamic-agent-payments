@@ -26,6 +26,7 @@ export function detectProtocol(
 
 // ============================================================
 // MPP Protocol (HTTP Payment Authentication Scheme)
+// draft-ryan-httpauth-payment-00
 // ============================================================
 
 export interface MppChallenge {
@@ -35,10 +36,13 @@ export interface MppChallenge {
   intent: string;
   request: string;
   expires?: string;
+  digest?: string;
+  description?: string;
   opaque?: string;
 }
 
-export interface MppRequestPayload {
+/** EIP-712 request format used by our x402-facilitator. */
+export interface Eip712MppRequest {
   amount: string;
   currency: string;
   recipient: string;
@@ -53,8 +57,16 @@ export interface MppRequestPayload {
   paymentId?: string;
 }
 
+/** Generic decoded MPP request — structure depends on the payment method. */
+export type MppRequestPayload = Eip712MppRequest | Record<string, unknown>;
+
+/** Methods this agent can handle (EIP-712 signing on EVM chains). */
+export const SUPPORTED_MPP_METHODS = ['transferwithauth', 'permit', 'opdata'];
+
 /**
  * Parse WWW-Authenticate: Payment headers into challenges.
+ * Supports multiple challenges per header (comma-separated) and
+ * multiple WWW-Authenticate headers (pass them joined with ', ').
  */
 export function parseMppChallenges(wwwAuthHeader: string): MppChallenge[] {
   const challenges: MppChallenge[] = [];
@@ -76,6 +88,8 @@ export function parseMppChallenges(wwwAuthHeader: string): MppChallenge[] {
         intent: params.intent,
         request: params.request,
         expires: params.expires,
+        digest: params.digest,
+        description: params.description,
         opaque: params.opaque,
       });
     }
@@ -85,19 +99,30 @@ export function parseMppChallenges(wwwAuthHeader: string): MppChallenge[] {
 
 /**
  * Decode the base64url-encoded request parameter from an MPP challenge.
+ * Returns the raw parsed JSON — structure depends on the payment method.
  */
-export function decodeMppRequest(requestB64: string): MppRequestPayload {
+export function decodeMppRequest(requestB64: string): Record<string, unknown> {
   const decoded = Buffer.from(requestB64, 'base64url').toString('utf-8');
   return JSON.parse(decoded);
 }
 
+/** Check if a decoded request has our facilitator's EIP-712 signatureData format. */
+export function isEip712Request(request: Record<string, unknown>): boolean {
+  const sd = request.signatureData;
+  return sd != null && typeof sd === 'object' && 'domain' in sd && 'types' in sd && 'primaryType' in sd;
+}
+
 /**
  * Select the best challenge from available options.
- * Priority: transferwithauth > permit > opdata
+ * Picks the first challenge whose method this agent supports.
+ * Falls back to the first challenge if none match (caller will get
+ * a descriptive error when trying to handle it).
  */
-export function selectChallenge(challenges: MppChallenge[]): MppChallenge | null {
-  const priority = ['transferwithauth', 'permit', 'opdata'];
-  for (const method of priority) {
+export function selectChallenge(
+  challenges: MppChallenge[],
+  supportedMethods: string[] = SUPPORTED_MPP_METHODS,
+): MppChallenge | null {
+  for (const method of supportedMethods) {
     const challenge = challenges.find(c => c.method === method);
     if (challenge) return challenge;
   }
@@ -132,74 +157,96 @@ function splitSignature(sig: string): { v: number; r: string; s: string } {
 
 /**
  * Build and encode an MPP credential for the Authorization header.
+ * Per spec: Authorization: Payment <base64url(JSON)>
+ * Credential echoes the full challenge, includes source (payer) and method-specific payload.
  */
-function buildMppCredential(
+export function buildMppCredential(
   challenge: MppChallenge,
   source: string,
-  signature: { v: number; r: string; s: string },
-  message: Record<string, unknown>,
+  payload: Record<string, unknown>,
 ): string {
-  const credential = {
-    challenge: {
-      id: challenge.id,
-      realm: challenge.realm,
-      method: challenge.method,
-      intent: challenge.intent,
-      request: challenge.request,
-      expires: challenge.expires,
-      opaque: challenge.opaque,
-    },
-    source,
-    payload: { signature, message },
+  const challengeEcho: Record<string, unknown> = {
+    id: challenge.id,
+    realm: challenge.realm,
+    method: challenge.method,
+    intent: challenge.intent,
+    request: challenge.request,
   };
+  if (challenge.expires) challengeEcho.expires = challenge.expires;
+  if (challenge.digest) challengeEcho.digest = challenge.digest;
+  if (challenge.description) challengeEcho.description = challenge.description;
+  if (challenge.opaque) challengeEcho.opaque = challenge.opaque;
+
+  const credential = { challenge: challengeEcho, source, payload };
   return `Payment ${Buffer.from(JSON.stringify(credential)).toString('base64url')}`;
+}
+
+export interface MppPaywallResult {
+  authorizationHeader: string;
+  paymentId?: string;
+  challenge: MppChallenge;
+  requestPayload: Record<string, unknown>;
 }
 
 /**
  * Handle an MPP 402 response: parse challenge, sign, build credential.
- * Returns the Authorization header value to retry the request with.
+ * Currently supports EIP-712 signing methods (transferwithauth, permit, opdata)
+ * used by our x402-facilitator. Other methods (tempo, stripe, etc.) will be
+ * added as Dynamic SDK adds support for those networks.
  */
 export async function handleMppPaywall(
   wwwAuthHeader: string,
-): Promise<{ authorizationHeader: string; paymentId?: string; challenge: MppChallenge; requestPayload: MppRequestPayload } | null> {
+): Promise<MppPaywallResult | null> {
   const challenges = parseMppChallenges(wwwAuthHeader);
   if (challenges.length === 0) return null;
 
   const challenge = selectChallenge(challenges);
   if (!challenge) return null;
 
+  // Check expiry — spec says clients MUST NOT submit expired challenges
+  if (challenge.expires && new Date(challenge.expires) < new Date()) {
+    throw new Error(`MPP challenge has expired (${challenge.expires})`);
+  }
+
   const requestPayload = decodeMppRequest(challenge.request);
-  const walletAddress = await getWalletAddress();
 
-  // Replace {{from}} placeholders with our wallet address
-  replacePlaceholders(requestPayload.signatureData, walletAddress);
+  // Route based on request format
+  if (isEip712Request(requestPayload)) {
+    // EIP-712 method (our facilitator): sign typed data and build credential
+    const eip712 = requestPayload as unknown as Eip712MppRequest;
+    const walletAddress = await getWalletAddress();
+    replacePlaceholders(eip712.signatureData, walletAddress);
 
-  // Build the EIP-712 typed data from the challenge
-  const typedData = {
-    domain: requestPayload.signatureData.domain,
-    types: requestPayload.signatureData.types,
-    primaryType: requestPayload.signatureData.primaryType,
-    message: requestPayload.signatureData.message,
-  };
+    const typedData = {
+      domain: eip712.signatureData.domain,
+      types: eip712.signatureData.types,
+      primaryType: eip712.signatureData.primaryType,
+      message: eip712.signatureData.message,
+    };
 
-  // Sign via Dynamic wallet
-  const signatureHex = await signTypedData(typedData);
-  const sigParts = splitSignature(signatureHex);
+    const signatureHex = await signTypedData(typedData);
+    const sigParts = splitSignature(signatureHex);
 
-  // Build the Authorization: Payment credential
-  const authHeader = buildMppCredential(
-    challenge,
-    walletAddress,
-    sigParts,
-    requestPayload.signatureData.message as Record<string, unknown>,
+    const authHeader = buildMppCredential(
+      challenge,
+      walletAddress,
+      { signature: sigParts, message: eip712.signatureData.message },
+    );
+
+    return {
+      authorizationHeader: authHeader,
+      paymentId: eip712.paymentId,
+      challenge,
+      requestPayload,
+    };
+  }
+
+  // Unknown method — give a descriptive error
+  throw new Error(
+    `Unsupported MPP method "${challenge.method}". ` +
+    `This agent supports EIP-712 methods: ${SUPPORTED_MPP_METHODS.join(', ')}. ` +
+    `Tempo and Solana support coming when Dynamic Node SDK adds those networks.`
   );
-
-  return {
-    authorizationHeader: authHeader,
-    paymentId: requestPayload.paymentId,
-    challenge,
-    requestPayload,
-  };
 }
 
 // ============================================================
