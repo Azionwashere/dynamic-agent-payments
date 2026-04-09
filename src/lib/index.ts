@@ -10,6 +10,7 @@ export {
   recordBroadcast,
   pollSettlement,
   executeCheckoutFlow,
+  cancelTransaction,
   getTransactionStatus,
 } from './checkout-client.js';
 export {

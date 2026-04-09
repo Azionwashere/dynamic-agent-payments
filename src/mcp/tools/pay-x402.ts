@@ -94,14 +94,13 @@ export async function payX402(
     };
   }
 
-  // Coinbase x402 Protocol (JSON body with accepts[])
+  // x402 Protocol (JSON body with accepts[])
   if (protocol === 'x402-coinbase' || protocol === 'none') {
     // Try parsing the response body for x402 payment requirements
     const body = await initialRes.json().catch(() => null);
 
     if (body?.accepts?.length > 0) {
-      // Standard Coinbase x402 format
-      const result = await handleCoinbaseX402(input.url, body.accepts[0], input.method, input.body);
+      const result = await handleCoinbaseX402(input.url, body.accepts[0], input.method, input.body, body.resource);
 
       if (emit) emitEvent(emit, 'x402_complete', {
         protocol: 'x402-coinbase',

@@ -14,7 +14,7 @@ const USAGE = `
 dynamic-agent-payments — CLI for x402 payments via Dynamic wallets
 
 Commands:
-  pay <url>          Pay for a Coinbase x402-protected resource
+  pay <url>          Pay for an x402-protected resource
   pay-mpp <url>      Pay for an MPP-protected resource
   balance            Check agent wallet balances
   fund               Fund agent wallet via checkout swap/bridge
@@ -27,8 +27,9 @@ Run any command with --help for details.
 const PAY_USAGE = `
 Usage: dynamic-agent-payments pay <url> [options]
 
-Pay for a Coinbase x402-protected resource. Handles the full flow:
-detect x402 payment requirements, sign via Dynamic wallet, retry.
+Pay for an x402-protected resource. Handles the full flow:
+detect payment requirements, sign via Dynamic wallet, retry.
+Supports both x402 v1 (Coinbase) and v2 (Fireblocks facilitator).
 
 Options:
   --method   HTTP method (GET or POST, default: GET)

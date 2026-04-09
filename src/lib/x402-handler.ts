@@ -379,34 +379,60 @@ export interface X402Accept {
   network: string;
   asset: string;
   payTo: string;
-  maxAmountRequired: string;
+  amount?: string;
+  maxAmountRequired?: string;
   maxTimeoutSeconds?: number;
   resource?: string;
+  extra?: {
+    name?: string;
+    version?: string;
+    assetTransferMethod?: string;
+  };
+}
+
+export interface X402Resource {
+  url: string;
+  description?: string;
+  mimeType?: string;
+  method?: string;
+}
+
+/** Parse chain ID from CAIP-2 network string ("eip155:8453") or name ("base"). */
+function parseChainId(network: string): number {
+  if (network.includes(':')) {
+    return parseInt(network.split(':')[1], 10);
+  }
+  // Legacy name-based fallbacks
+  const map: Record<string, number> = { base: 8453, ethereum: 1, polygon: 137, arbitrum: 42161 };
+  return map[network] ?? 8453;
 }
 
 /**
- * Handle Coinbase x402 v1 payment: sign TransferWithAuthorization + retry with X-PAYMENT header.
+ * Handle x402 payment: sign TransferWithAuthorization + retry with payment header.
+ * Supports both v1 (Coinbase X-PAYMENT) and v2 (payment-signature) wire formats.
  */
 export async function handleCoinbaseX402(
   url: string,
   accept: X402Accept,
   method = 'GET',
   body?: string,
+  resource?: X402Resource,
 ): Promise<X402PaymentResult & { responseData?: unknown }> {
   const walletAddress = await getWalletAddress();
+  const amount = accept.amount ?? accept.maxAmountRequired ?? '0';
+  const chainId = parseChainId(accept.network);
 
   // Build EIP-712 TransferWithAuthorization typed data
-  // USDC on Base uses domain name "USD Coin", version "2"
   const nonce = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
     .map(b => b.toString(16).padStart(2, '0')).join('');
   const validAfter = '0';
-  const validBefore = String(Math.floor(Date.now() / 1000) + (accept.maxTimeoutSeconds ?? 60));
+  const validBefore = String(Math.floor(Date.now() / 1000) + (accept.maxTimeoutSeconds ?? 300));
 
   const typedData = {
     domain: {
-      name: 'USD Coin',
-      version: '2',
-      chainId: accept.network === 'base' ? 8453 : 1,
+      name: accept.extra?.name ?? 'USD Coin',
+      version: accept.extra?.version ?? '2',
+      chainId,
       verifyingContract: accept.asset,
     },
     types: {
@@ -423,34 +449,34 @@ export async function handleCoinbaseX402(
     message: {
       from: walletAddress,
       to: accept.payTo,
-      value: accept.maxAmountRequired,
+      value: amount,
       validAfter,
       validBefore,
       nonce,
     },
   };
 
-  // Sign
   const signature = await signTypedData(typedData);
 
-  // Build X-PAYMENT header payload
+  // Build v2 payment payload (backward compatible with v1 endpoints)
   const paymentPayload = {
-    x402Version: 1,
-    scheme: accept.scheme,
-    network: accept.network,
+    x402Version: 2,
+    ...(resource ? { resource } : {}),
+    accepted: accept,
     payload: {
       signature,
       authorization: typedData.message,
     },
   };
 
-  const xPaymentHeader = Buffer.from(JSON.stringify(paymentPayload)).toString('base64');
+  const encodedPayload = Buffer.from(JSON.stringify(paymentPayload)).toString('base64');
 
-  // Retry with payment
+  // Retry with payment — send both headers for compatibility
   const retryRes = await fetch(url, {
     method,
     headers: {
-      'X-PAYMENT': xPaymentHeader,
+      'payment-signature': encodedPayload,
+      'X-PAYMENT': encodedPayload,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body } : {}),
@@ -460,10 +486,20 @@ export async function handleCoinbaseX402(
   let responseData: unknown;
   try { responseData = JSON.parse(responseText); } catch { responseData = responseText; }
 
-  const xPaymentResponse = retryRes.headers.get('x-payment-response');
+  // Check both v2 and v1 response headers
+  const paymentResponse = retryRes.headers.get('payment-response')
+    ?? retryRes.headers.get('x-payment-response');
+
+  let settlementHash = paymentResponse ?? '';
+  if (paymentResponse) {
+    try {
+      const decoded = JSON.parse(Buffer.from(paymentResponse, 'base64').toString('utf-8'));
+      settlementHash = decoded.transaction ?? decoded.txHash ?? paymentResponse;
+    } catch { /* keep raw */ }
+  }
 
   return {
-    settlementHash: xPaymentResponse ?? '',
+    settlementHash,
     accessGranted: retryRes.ok,
     protocol: 'x402-coinbase',
     responseData,

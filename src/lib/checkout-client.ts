@@ -127,7 +127,7 @@ export async function waitForRiskClearance(
       `/sdk/${environmentId}/transactions/${transactionId}`,
       { method: 'GET' },
     );
-    const risk = tx.riskState ?? tx.transaction?.riskState;
+    const risk = tx.riskState;
     if (risk === 'cleared' || risk === 'not_required') return;
     if (risk === 'blocked') throw new Error('Payment source blocked by risk screening');
     await new Promise(r => setTimeout(r, 2_000));
@@ -155,12 +155,14 @@ export async function getQuote(
       body: JSON.stringify(body),
     },
   );
-  // Quote is at data.quote per spec
-  const quote = data.quote ?? data.transaction?.quote ?? data;
+  const quote = data.quote;
+  if (!quote) {
+    throw new Error(`No quote in response: ${JSON.stringify(data).slice(0, 200)}`);
+  }
 
   return {
-    fromAmount: quote.fromAmount ?? quote.fromTokenAmount ?? '0',
-    toAmount: quote.toAmount ?? quote.toTokenAmount ?? '0',
+    fromAmount: quote.fromAmount ?? '0',
+    toAmount: quote.toAmount ?? '0',
     estimatedTimeSec: quote.estimatedTimeSec ?? 0,
     fees: quote.fees ?? { totalFeeUsd: '0' },
     quoteExpiresAt: quote.expiresAt,
@@ -181,13 +183,13 @@ export async function prepareSigning(
     {
       method: 'POST',
       headers: { [SESSION_HEADER]: sessionToken },
+      body: JSON.stringify({
+        assertBalanceForGasCost: true,
+        assertBalanceForTransferAmount: true,
+      }),
     },
   );
-  // Per spec: signing payload is at quote.signingPayload
-  const payload =
-    data.quote?.signingPayload ??
-    data.transaction?.signingPayload ??
-    data.signingPayload;
+  const payload = data.quote?.signingPayload;
 
   if (!payload) {
     throw new Error(`No signing payload in prepare response: ${JSON.stringify(data).slice(0, 200)}`);
@@ -249,6 +251,23 @@ export async function pollSettlement(
     }
   }
   throw new Error(`Settlement timeout after ${maxDurationMs / 1000}s for transaction ${transactionId}`);
+}
+
+// Cancel a transaction (valid in: initiated, source_attached, quoted, signing)
+export async function cancelTransaction(
+  apiBase: string,
+  environmentId: string,
+  transactionId: string,
+  sessionToken: string,
+): Promise<void> {
+  await checkoutApi(
+    apiBase,
+    `/sdk/${environmentId}/transactions/${transactionId}/cancel`,
+    {
+      method: 'POST',
+      headers: { [SESSION_HEADER]: sessionToken },
+    },
+  );
 }
 
 // Get transaction status (for external polling)

@@ -89,19 +89,15 @@ describe('getQuote', () => {
     expect(quote.version).toBe(1);
   });
 
-  it('normalizes flat quote shape (data itself)', async () => {
+  it('throws when quote is missing from response', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({
-        fromAmount: '1.10',
-        toAmount: '1.00',
-        estimatedTimeSec: 30,
-        fees: { totalFeeUsd: '0.10' },
-      }),
+      json: async () => ({ unexpected: 'data' }),
     });
 
-    const quote = await getQuote(API_BASE, ENV_ID, 'tx_3', 'session_3', '0x0');
-    expect(quote.fromAmount).toBe('1.10');
+    await expect(
+      getQuote(API_BASE, ENV_ID, 'tx_3', 'session_3', '0x0'),
+    ).rejects.toThrow('No quote in response');
   });
 
   it('passes slippage parameter when provided', async () => {
@@ -132,14 +128,17 @@ describe('getQuote', () => {
     expect(body.slippage).toBeUndefined();
   });
 
-  it('returns defaults for unexpected shape', async () => {
+  it('handles quote with missing optional fields', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ unexpected: 'data' }),
+      json: async () => ({
+        quote: { estimatedTimeSec: 60 },
+      }),
     });
 
     const quote = await getQuote(API_BASE, ENV_ID, 'tx_4', 'session_4', '0x0');
     expect(quote.fromAmount).toBe('0');
+    expect(quote.fees.totalFeeUsd).toBe('0');
   });
 });
 
@@ -218,5 +217,22 @@ describe('prepareSigning', () => {
 
     const headers = mockFetch.mock.calls[0][1].headers;
     expect(headers['x-dynamic-checkout-session-token']).toBe('session_h');
+  });
+
+  it('sends balance assertion parameters', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        quote: {
+          signingPayload: { chainName: 'EVM', chainId: '8453', evmTransaction: { to: '0x', data: '0x', value: '0x0', gasLimit: '0x' } },
+        },
+      }),
+    });
+
+    await prepareSigning(API_BASE, ENV_ID, 'tx_ba', 'session_ba');
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.assertBalanceForGasCost).toBe(true);
+    expect(body.assertBalanceForTransferAmount).toBe(true);
   });
 });
