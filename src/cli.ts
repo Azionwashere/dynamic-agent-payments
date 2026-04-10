@@ -3,23 +3,27 @@ import 'dotenv/config';
 import { parseArgs } from 'node:util';
 import { loadConfig, chainFamily } from './lib/config.js';
 import { createEventEmitter } from './lib/events.js';
-import { ensureWallet } from './lib/wallet.js';
+import { getWallet, createAndPersistWallet, listAllWallets, setActiveWallet } from './lib/wallet.js';
 import { payX402 } from './mcp/tools/pay-x402.js';
 import { checkBalance } from './mcp/tools/check-balance.js';
 import { fundAgent } from './mcp/tools/fund-agent.js';
 import { getTxStatus } from './mcp/tools/tx-status.js';
 import { detectProtocol, parseMppChallenges, selectChallenge, handleMppPaywall } from './lib/x402-handler.js';
 import { emitEvent } from './lib/events.js';
+import { startFundingServer } from './funding/server.js';
 
 const USAGE = `
 dynamic-agent-payments — CLI for x402 payments via Dynamic wallets
 
 Commands:
-  wallet             Show your wallet addresses
+  wallet             Create or show your wallet addresses
+  wallet list        Show all wallets in this environment
+  wallet use <addr>  Switch active wallet
   balance            Check token balances
   pay <url>          Pay for an x402-protected resource
   pay-mpp <url>      Pay for an MPP-protected resource
   fund               Fund wallet via checkout swap/bridge
+  fund-browser       Open browser to fund wallet via MetaMask
   status <txId>      Check transaction status
   dashboard          Open live activity dashboard
 
@@ -105,13 +109,65 @@ function parseJson(raw: string | undefined, label: string): Record<string, unkno
   }
 }
 
-async function cmdWallet() {
+async function cmdWallet(argv: string[]) {
   loadConfig();
-  const evmWallet = await ensureWallet('EVM');
+  const sub = argv[0];
+
+  // wallet list — show all wallets from Dynamic API
+  if (sub === 'list') {
+    const all = await listAllWallets();
+    const activeEvm = process.env.WALLET_ADDRESS?.toLowerCase();
+    const activeSol = process.env.SOL_WALLET_ADDRESS?.toLowerCase();
+
+    const evm = all.filter(w => w.chainName === 'EVM');
+    const sol = all.filter(w => w.chainName === 'SVM');
+
+    console.log('');
+    if (evm.length > 0) {
+      console.log('EVM Wallets:');
+      for (const w of evm) {
+        const active = w.accountAddress.toLowerCase() === activeEvm ? '  \u2190 active' : '';
+        console.log(`  ${w.accountAddress}${active}`);
+      }
+    } else {
+      console.log('EVM Wallets: none');
+    }
+
+    if (sol.length > 0) {
+      console.log('\nSOL Wallets:');
+      for (const w of sol) {
+        const active = w.accountAddress.toLowerCase() === activeSol ? '  \u2190 active' : '';
+        console.log(`  ${w.accountAddress}${active}`);
+      }
+    }
+    console.log('');
+    return;
+  }
+
+  // wallet use <address> — switch active wallet
+  if (sub === 'use') {
+    const address = argv[1];
+    if (!address) fatal('Usage: dynamic-agent-payments wallet use <address>');
+    const wallet = await setActiveWallet(address);
+    console.log(`\nActive ${wallet.chain} wallet set to: ${wallet.accountAddress}`);
+    console.log('Updated .env\n');
+    return;
+  }
+
+  // wallet (no subcommand) — show active wallets, create EVM if missing
+  let evmWallet;
+  try {
+    evmWallet = getWallet('EVM');
+  } catch {
+    console.error('No EVM wallet configured. Creating one...');
+    evmWallet = await createAndPersistWallet('EVM');
+    console.error(`Created and saved to .env: ${evmWallet.accountAddress}\n`);
+  }
+
   console.log('');
   console.log('EVM:  ' + evmWallet.accountAddress);
   try {
-    const solWallet = await ensureWallet('SOL');
+    const solWallet = getWallet('SOL');
     console.log('SOL:  ' + solWallet.accountAddress);
   } catch { /* SOL not configured */ }
   console.log('');
@@ -327,6 +383,25 @@ async function cmdFund(argv: string[]) {
   console.log(JSON.stringify(result, null, 2));
 }
 
+async function cmdFundBrowser() {
+  loadConfig();
+  console.error('Starting funding server...');
+  const { url } = await startFundingServer();
+  console.error(`\nFunding page ready: ${url}`);
+  console.error('Connect MetaMask in the browser to send tokens to your agent wallet.');
+  console.error('Press Ctrl+C to stop.\n');
+
+  // Open browser
+  const { exec } = await import('node:child_process');
+  const cmd = process.platform === 'darwin' ? 'open'
+    : process.platform === 'win32' ? 'start'
+    : 'xdg-open';
+  exec(`${cmd} "${url}"`);
+
+  // Keep process alive
+  await new Promise(() => {});
+}
+
 async function cmdStatus(argv: string[]) {
   const { positionals, values } = parseArgs({
     args: argv,
@@ -357,12 +432,13 @@ async function main() {
   }
 
   switch (command) {
-    case 'wallet':    await cmdWallet(); break;
+    case 'wallet':       await cmdWallet(rest); break;
     case 'pay':       await cmdPay(rest); break;
     case 'pay-mpp':   await cmdPayMpp(rest); break;
     case 'balance':   await cmdBalance(rest); break;
-    case 'fund':      await cmdFund(rest); break;
-    case 'status':    await cmdStatus(rest); break;
+    case 'fund':         await cmdFund(rest); break;
+    case 'fund-browser': await cmdFundBrowser(); break;
+    case 'status':       await cmdStatus(rest); break;
     case 'dashboard': await import('./dashboard/server.js'); break;
     default:
       console.error(`Unknown command: ${command}\n`);

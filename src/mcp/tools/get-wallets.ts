@@ -1,4 +1,4 @@
-import { ensureWallet, getBalances } from '../../lib/wallet.js';
+import { getWallet, getBalances } from '../../lib/wallet.js';
 
 export interface WalletInfo {
   address: string;
@@ -7,7 +7,7 @@ export interface WalletInfo {
 }
 
 export async function getWallets(): Promise<{ evm: WalletInfo; sol?: WalletInfo }> {
-  const evmWallet = await ensureWallet('EVM');
+  const evmWallet = getWallet('EVM');
   const evm: WalletInfo = { address: evmWallet.accountAddress, chain: 'EVM' };
 
   // Try to get EVM balances (non-blocking — ok if it fails)
@@ -17,7 +17,7 @@ export async function getWallets(): Promise<{ evm: WalletInfo; sol?: WalletInfo 
 
   let sol: WalletInfo | undefined;
   try {
-    const solWallet = await ensureWallet('SOL');
+    const solWallet = getWallet('SOL');
     sol = { address: solWallet.accountAddress, chain: 'SOL' };
     try {
       sol.balances = await getBalances('SOL', solWallet.accountAddress);

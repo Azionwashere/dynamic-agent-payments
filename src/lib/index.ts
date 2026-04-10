@@ -14,9 +14,12 @@ export {
   getTransactionStatus,
 } from './checkout-client.js';
 export {
-  createEvmWallet,
-  ensureWallet,
+  getWallet,
   getWalletAddress,
+  createAndPersistWallet,
+  listAllWallets,
+  setActiveWallet,
+  ensureWallet,
   signAndBroadcastTransaction,
   signTypedData,
   getBalances,

@@ -39,8 +39,8 @@ export async function fundAgent(
     ...(input.memo ? { memo: input.memo } : {}),
   });
 
-  const sourceAddress = await getWalletAddress(fromChainName);
-  const destAddress = await getWalletAddress(toChainName);
+  const sourceAddress = getWalletAddress(fromChainName);
+  const destAddress = getWalletAddress(toChainName);
 
   // Get or create checkout for this destination chain
   const cacheKey = `${input.toChainId}-${input.toTokenAddress}`;

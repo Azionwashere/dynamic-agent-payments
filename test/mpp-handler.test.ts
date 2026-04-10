@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 // Mock wallet to avoid Dynamic SDK import
 vi.mock('../src/lib/wallet.js', () => ({
   signTypedData: vi.fn().mockResolvedValue('0x' + 'ab'.repeat(32) + 'cd'.repeat(32) + '1b'),
-  getWalletAddress: vi.fn().mockResolvedValue('0xAgentWalletAddress'),
+  getWalletAddress: vi.fn().mockReturnValue('0xAgentWalletAddress'),
 }));
 
 vi.mock('../src/lib/config.js', () => ({

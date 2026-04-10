@@ -1,6 +1,8 @@
 import { DynamicEvmWalletClient } from '@dynamic-labs-wallet/node-evm';
 import { DynamicSvmWalletClient } from '@dynamic-labs-wallet/node-svm';
 import { ThresholdSignatureScheme } from '@dynamic-labs-wallet/node';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { SigningPayload, WalletInfo } from './types.js';
 import { loadConfig } from './config.js';
 
@@ -11,7 +13,6 @@ let _svmClient: DynamicSvmWalletClient | null = null;
 let _evmAuthenticated = false;
 let _svmAuthenticated = false;
 
-// Cached wallets: chain family → wallet info
 const walletCache = new Map<string, WalletInfo>();
 
 async function getEvmClient(): Promise<DynamicEvmWalletClient> {
@@ -36,10 +37,89 @@ async function getSvmClient(): Promise<DynamicSvmWalletClient> {
   return _svmClient;
 }
 
+// ---- .env persistence ----
+
+const ENV_KEYS: Record<ChainFamily, { address: string; id: string }> = {
+  EVM: { address: 'WALLET_ADDRESS', id: 'WALLET_ID' },
+  SOL: { address: 'SOL_WALLET_ADDRESS', id: 'SOL_WALLET_ID' },
+};
+
+function envPath(): string {
+  return resolve(process.cwd(), '.env');
+}
+
+function writeToEnv(key: string, value: string): void {
+  const path = envPath();
+  let content = existsSync(path) ? readFileSync(path, 'utf-8') : '';
+
+  // Replace existing key or append
+  const regex = new RegExp(`^${key}=.*$`, 'm');
+  if (regex.test(content)) {
+    content = content.replace(regex, `${key}=${value}`);
+  } else {
+    content = content.trimEnd() + `\n${key}=${value}\n`;
+  }
+
+  writeFileSync(path, content);
+  // Also update process.env so the current session picks it up
+  process.env[key] = value;
+}
+
+function persistWalletToEnv(wallet: WalletInfo): void {
+  const keys = ENV_KEYS[wallet.chain];
+  writeToEnv(keys.address, wallet.accountAddress);
+  writeToEnv(keys.id, wallet.walletId);
+}
+
+// ---- Wallet access (read-only, throws if not configured) ----
+
 /**
- * Create a new EVM wallet.
+ * Get the configured wallet for a chain family.
+ * Throws if no wallet is configured in .env — never creates one.
  */
-export async function createEvmWallet(): Promise<WalletInfo> {
+export function getWallet(chain: ChainFamily = 'EVM'): WalletInfo {
+  const cacheKey = chain.toLowerCase();
+  const cached = walletCache.get(cacheKey);
+  if (cached) return cached;
+
+  const keys = ENV_KEYS[chain];
+  const addr = process.env[keys.address];
+  const id = process.env[keys.id];
+
+  if (!addr || !id) {
+    throw new Error(
+      `No ${chain} wallet configured. Run \`dynamic-agent-payments wallet\` to create one.`
+    );
+  }
+
+  const info: WalletInfo = { accountAddress: addr, walletId: id, chain };
+  walletCache.set(cacheKey, info);
+  return info;
+}
+
+/**
+ * Get the wallet address for a chain family. Throws if not configured.
+ */
+export function getWalletAddress(chain: ChainFamily = 'EVM'): string {
+  return getWallet(chain).accountAddress;
+}
+
+// ---- Wallet creation (explicit only, persists to .env) ----
+
+/**
+ * Create a new wallet and persist it to .env. Only called by the `wallet` command.
+ */
+export async function createAndPersistWallet(chain: ChainFamily = 'EVM'): Promise<WalletInfo> {
+  const info = chain === 'SOL'
+    ? await createSvmWallet()
+    : await createEvmWallet();
+
+  persistWalletToEnv(info);
+  walletCache.set(chain.toLowerCase(), info);
+  return info;
+}
+
+async function createEvmWallet(): Promise<WalletInfo> {
   const client = await getEvmClient();
   const result = await client.createWalletAccount({
     thresholdSignatureScheme: ThresholdSignatureScheme.TWO_OF_TWO,
@@ -48,10 +128,7 @@ export async function createEvmWallet(): Promise<WalletInfo> {
   return { accountAddress: result.accountAddress, walletId: result.walletId, chain: 'EVM' };
 }
 
-/**
- * Create a new SOL wallet.
- */
-export async function createSvmWallet(): Promise<WalletInfo> {
+async function createSvmWallet(): Promise<WalletInfo> {
   const client = await getSvmClient();
   const result = await (client as any).createWalletAccount({
     thresholdSignatureScheme: ThresholdSignatureScheme.TWO_OF_TWO,
@@ -60,47 +137,62 @@ export async function createSvmWallet(): Promise<WalletInfo> {
   return { accountAddress: result.accountAddress, walletId: result.walletId, chain: 'SOL' };
 }
 
-/**
- * Ensure a wallet exists for the given chain family.
- * Checks cache, then env vars, then creates a new one.
- */
-export async function ensureWallet(chain: ChainFamily = 'EVM'): Promise<WalletInfo> {
-  const cacheKey = chain.toLowerCase();
-  const cached = walletCache.get(cacheKey);
-  if (cached) return cached;
+// ---- List all wallets from Dynamic API ----
 
-  // Check env vars
-  if (chain === 'EVM') {
-    const addr = process.env.WALLET_ADDRESS;
-    const id = process.env.WALLET_ID;
-    if (addr && id) {
-      const info: WalletInfo = { accountAddress: addr, walletId: id, chain: 'EVM' };
-      walletCache.set(cacheKey, info);
-      return info;
-    }
-  } else if (chain === 'SOL') {
-    const addr = process.env.SOL_WALLET_ADDRESS;
-    const id = process.env.SOL_WALLET_ID;
-    if (addr && id) {
-      const info: WalletInfo = { accountAddress: addr, walletId: id, chain: 'SOL' };
-      walletCache.set(cacheKey, info);
-      return info;
-    }
+export interface RemoteWallet {
+  walletId: string;
+  chainName: string;
+  accountAddress: string;
+}
+
+/**
+ * Query Dynamic API for all wallets in this environment.
+ */
+export async function listAllWallets(): Promise<RemoteWallet[]> {
+  const client = await getEvmClient();
+  const wallets = await (client as any).getWallets();
+  return (wallets as any[]).map(w => ({
+    walletId: w.walletId,
+    chainName: w.chainName,
+    accountAddress: w.accountAddress,
+  }));
+}
+
+// ---- Switch active wallet ----
+
+/**
+ * Set an existing wallet as active by writing to .env.
+ * Looks up the wallet from Dynamic API to get the walletId.
+ */
+export async function setActiveWallet(address: string): Promise<WalletInfo> {
+  const all = await listAllWallets();
+  const match = all.find(w =>
+    w.accountAddress.toLowerCase() === address.toLowerCase()
+  );
+
+  if (!match) {
+    throw new Error(
+      `Wallet ${address} not found in this environment. Run \`wallet list\` to see available wallets.`
+    );
   }
 
-  // Create a new wallet
-  const info = chain === 'SOL' ? await createSvmWallet() : await createEvmWallet();
-  walletCache.set(cacheKey, info);
+  const chain: ChainFamily = match.chainName === 'SVM' ? 'SOL' : 'EVM';
+  const info: WalletInfo = {
+    accountAddress: match.accountAddress,
+    walletId: match.walletId,
+    chain,
+  };
+
+  persistWalletToEnv(info);
+  walletCache.set(chain.toLowerCase(), info);
   return info;
 }
 
-/**
- * Get the wallet address for a chain family (creates wallet if needed).
- */
-export async function getWalletAddress(chain: ChainFamily = 'EVM'): Promise<string> {
-  const wallet = await ensureWallet(chain);
-  return wallet.accountAddress;
-}
+// ---- Keep ensureWallet as alias for getWallet (backward compat for imports) ----
+/** @deprecated Use getWallet() instead */
+export const ensureWallet = getWallet;
+
+// ---- Signing ----
 
 /**
  * Sign an EVM transaction and broadcast it. Returns tx hash.
@@ -114,19 +206,17 @@ export async function signAndBroadcastTransaction(
   }
 
   const client = await getEvmClient();
-  const wallet = await ensureWallet();
+  const wallet = getWallet();
 
   const txReq = (payload.transactionRequest ?? payload) as any;
   const chainId = txReq.chainId?.toString() ?? '8453';
 
-  // Get a viem wallet client from Dynamic — handles RPC internally
   const walletClient = await (client as any).getWalletClient({
     accountAddress: wallet.accountAddress,
     chainId: parseInt(chainId),
     rpcUrl: `https://${chainId === '8453' ? 'mainnet.base.org' : 'mainnet.base.org'}`,
   });
 
-  // Sign and broadcast via Dynamic's wallet client
   const txHash = await walletClient.sendTransaction({
     to: txReq.to as `0x${string}`,
     data: txReq.data as `0x${string}` | undefined,
@@ -147,7 +237,7 @@ export async function signAndBroadcastTransaction(
  */
 export async function signTypedData(typedData: any): Promise<string> {
   const client = await getEvmClient();
-  const wallet = await ensureWallet();
+  const wallet = getWallet();
 
   const signature = await client.signTypedData({
     accountAddress: wallet.accountAddress,

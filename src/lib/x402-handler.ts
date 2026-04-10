@@ -214,7 +214,7 @@ export async function handleMppPaywall(
   if (isEip712Request(requestPayload)) {
     // EIP-712 method (our facilitator): sign typed data and build credential
     const eip712 = requestPayload as unknown as Eip712MppRequest;
-    const walletAddress = await getWalletAddress();
+    const walletAddress = getWalletAddress();
     replacePlaceholders(eip712.signatureData, walletAddress);
 
     const typedData = {
