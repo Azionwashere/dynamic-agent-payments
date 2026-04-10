@@ -192,6 +192,15 @@ export async function setActiveWallet(address: string): Promise<WalletInfo> {
 /** @deprecated Use getWallet() instead */
 export const ensureWallet = getWallet;
 
+/** Reset internal state (for testing only). */
+export function resetWalletState(): void {
+  walletCache.clear();
+  _evmClient = null;
+  _svmClient = null;
+  _evmAuthenticated = false;
+  _svmAuthenticated = false;
+}
+
 // ---- Signing ----
 
 /**
