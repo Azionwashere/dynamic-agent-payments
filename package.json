@@ -18,10 +18,10 @@
     "dashboard": "node dist/dashboard/server.js"
   },
   "dependencies": {
-    "@dynamic-labs-wallet/node": "^0.0.322",
-    "@dynamic-labs-wallet/node-evm": "^0.0.322",
-    "@dynamic-labs-wallet/node-svm": "^0.0.322",
-    "@modelcontextprotocol/sdk": "1.27.0",
+    "@dynamic-labs-wallet/node": "^0.0.323",
+    "@dynamic-labs-wallet/node-evm": "^0.0.323",
+    "@dynamic-labs-wallet/node-svm": "^0.0.323",
+    "@modelcontextprotocol/sdk": "1.27.1",
     "@solana/web3.js": "^1.95.0",
     "dotenv": "^17.3.1",
     "ethers": "^6.16.0",
@@ -30,8 +30,9 @@
     "zod": "^3.23.0"
   },
   "overrides": {
-    "rollup": "4.34.8",
-    "@modelcontextprotocol/sdk": "1.27.0",
+    "rollup": "4.59.0",
+    "@modelcontextprotocol/sdk": "1.27.1",
+    "hono": "4.12.8",
     "ws": "8.18.0"
   },
   "devDependencies": {
