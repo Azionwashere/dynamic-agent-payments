@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { parseArgs } from 'node:util';
 import { loadConfig, chainFamily } from './lib/config.js';
 import { createEventEmitter } from './lib/events.js';
+import { ensureWallet } from './lib/wallet.js';
 import { payX402 } from './mcp/tools/pay-x402.js';
 import { checkBalance } from './mcp/tools/check-balance.js';
 import { fundAgent } from './mcp/tools/fund-agent.js';
@@ -14,10 +15,11 @@ const USAGE = `
 dynamic-agent-payments — CLI for x402 payments via Dynamic wallets
 
 Commands:
+  wallet             Show your wallet addresses
+  balance            Check token balances
   pay <url>          Pay for an x402-protected resource
   pay-mpp <url>      Pay for an MPP-protected resource
-  balance            Check agent wallet balances
-  fund               Fund agent wallet via checkout swap/bridge
+  fund               Fund wallet via checkout swap/bridge
   status <txId>      Check transaction status
   dashboard          Open live activity dashboard
 
@@ -101,6 +103,18 @@ function parseJson(raw: string | undefined, label: string): Record<string, unkno
   } catch {
     fatal(`Invalid JSON for --${label}: ${raw}`);
   }
+}
+
+async function cmdWallet() {
+  loadConfig();
+  const evmWallet = await ensureWallet('EVM');
+  console.log('');
+  console.log('EVM:  ' + evmWallet.accountAddress);
+  try {
+    const solWallet = await ensureWallet('SOL');
+    console.log('SOL:  ' + solWallet.accountAddress);
+  } catch { /* SOL not configured */ }
+  console.log('');
 }
 
 async function cmdPay(argv: string[]) {
@@ -343,6 +357,7 @@ async function main() {
   }
 
   switch (command) {
+    case 'wallet':    await cmdWallet(); break;
     case 'pay':       await cmdPay(rest); break;
     case 'pay-mpp':   await cmdPayMpp(rest); break;
     case 'balance':   await cmdBalance(rest); break;

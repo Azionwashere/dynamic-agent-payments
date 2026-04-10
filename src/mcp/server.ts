@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { createEventEmitter } from '../lib/events.js';
 import { loadConfig } from '../lib/config.js';
 import { payX402, payX402Schema } from './tools/pay-x402.js';
+import { getWallets } from './tools/get-wallets.js';
 
 // Validate config at startup
 loadConfig();
@@ -28,6 +29,19 @@ server.tool(
     const result = await payX402(input as any, emit);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+    };
+  },
+);
+
+server.tool(
+  'get_wallets',
+  'Get the agent wallet addresses and balances. Returns EVM and SOL wallet addresses. ' +
+  'Use this when the user asks to see their wallets, check addresses, or fund their wallet.',
+  {},
+  async () => {
+    const wallets = await getWallets();
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(wallets, null, 2) }],
     };
   },
 );
