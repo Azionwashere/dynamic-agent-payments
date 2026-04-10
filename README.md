@@ -50,17 +50,33 @@ DYNAMIC_AUTH_TOKEN=dyn_your-token
 
 Get these from [app.dynamic.xyz](https://app.dynamic.xyz).
 
+Create your agent wallet:
+```bash
+npx dynamic-agent-payments wallet
+```
+
+This creates an EVM wallet and saves `WALLET_ADDRESS` and `WALLET_ID` to `.env` automatically.
+
 ## CLI Usage
 
 ```bash
+# Create or show your agent wallet
+npx dynamic-agent-payments wallet
+
+# List all wallets in your environment (find previous wallets)
+npx dynamic-agent-payments wallet list
+
+# Switch to a different wallet
+npx dynamic-agent-payments wallet use 0xYourAddress
+
+# Check wallet balances
+npx dynamic-agent-payments balance
+
 # Pay for a Coinbase x402-protected resource
 npx dynamic-agent-payments pay https://x402-api.fly.dev/api/price-feed
 
 # Pay for an MPP-protected resource (Stripe, custom MPP servers)
 npx dynamic-agent-payments pay-mpp https://api.example.com/resource
-
-# Check wallet balances
-npx dynamic-agent-payments balance
 
 # Fund agent wallet (swap ETH on Ethereum → USDC on Base)
 npx dynamic-agent-payments fund --amount 5.00 \
@@ -93,7 +109,7 @@ The agent passes a URL. The CLI handles everything:
 4. **Signs the payment** — EIP-712 via Dynamic's MPC wallet (no private keys stored locally)
 5. **Retries the request** — submits proof of payment, returns the data
 
-The agent's wallet is created automatically on first use. Fund it with any token on any chain — the Checkout API handles the rest.
+Run `wallet` to create your agent's wallet (saved to `.env`). Fund it with any token on any chain — the Checkout API handles the rest. Use `wallet list` to see all wallets in your environment and `wallet use` to switch between them.
 
 ## Claude Code Integration (MCP)
 
@@ -155,6 +171,10 @@ Shows every step: paywall detection → balance check → swap → signing → p
 |----------|----------|-------------|
 | `DYNAMIC_ENVIRONMENT_ID` | Yes | From Dynamic dashboard |
 | `DYNAMIC_AUTH_TOKEN` | Yes | API token (starts with `dyn_`) |
+| `WALLET_ADDRESS` | Yes | EVM wallet address (auto-set by `wallet` command) |
+| `WALLET_ID` | Yes | EVM wallet ID (auto-set by `wallet` command) |
+| `SOL_WALLET_ADDRESS` | No | Solana wallet address (auto-set by `wallet` command) |
+| `SOL_WALLET_ID` | No | Solana wallet ID (auto-set by `wallet` command) |
 | `MIN_FUNDING_THRESHOLD_USD` | No | Minimum swap amount to avoid bridging for tiny payments (default $1.00) |
 
 ## Development
@@ -164,6 +184,6 @@ npm run build      # Compile
 npm run cli        # Run CLI
 npm run mcp        # Run MCP server
 npm run dev        # Watch mode
-npm run test       # 42 tests passing
+npm run test       # 72 tests passing
 npm run dashboard  # Activity feed UI
 ```
