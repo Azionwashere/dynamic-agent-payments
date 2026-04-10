@@ -73,11 +73,26 @@ export async function fundAgent(
     sourceChainName: fromChainName,
     fromTokenAddress: input.fromTokenAddress,
     signTransaction: signAndBroadcastTransaction,
+    sendApproval: async (approval) => {
+      const txHash = await signAndBroadcastTransaction(
+        {
+          to: approval.tokenAddress,
+          data: buildApprovalData(approval.spenderAddress, approval.amount),
+          value: '0',
+          transactionRequest: {
+            to: approval.tokenAddress,
+            data: buildApprovalData(approval.spenderAddress, approval.amount),
+            value: '0',
+          },
+        },
+        fromChainName,
+      );
+      return txHash;
+    },
     slippage: input.slippage,
     minFundingThresholdUsd: config.minFundingThresholdUsd,
     emit,
     memo: input.memo,
-    // TODO: implement sendApproval for ERC-20 token swaps
   });
 
   if (emit) emitEvent(emit, 'fund_complete', {
@@ -87,4 +102,11 @@ export async function fundAgent(
   });
 
   return result;
+}
+
+/** Build ERC-20 approve(address,uint256) calldata. */
+function buildApprovalData(spender: string, amount: string): string {
+  const s = spender.replace('0x', '').padStart(64, '0');
+  const a = BigInt(amount).toString(16).padStart(64, '0');
+  return '0x095ea7b3' + s + a;
 }

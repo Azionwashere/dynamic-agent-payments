@@ -10,7 +10,6 @@ import { fundAgent } from './mcp/tools/fund-agent.js';
 import { getTxStatus } from './mcp/tools/tx-status.js';
 import { detectProtocol, parseMppChallenges, selectChallenge, handleMppPaywall } from './lib/x402-handler.js';
 import { emitEvent } from './lib/events.js';
-import { startFundingServer } from './funding/server.js';
 
 const USAGE = `
 dynamic-agent-payments — CLI for x402 payments via Dynamic wallets
@@ -23,7 +22,6 @@ Commands:
   pay <url>          Pay for an x402-protected resource
   pay-mpp <url>      Pay for an MPP-protected resource
   fund               Fund wallet via checkout swap/bridge
-  fund-browser       Open browser to fund wallet via MetaMask
   status <txId>      Check transaction status
   dashboard          Open live activity dashboard
 
@@ -383,25 +381,6 @@ async function cmdFund(argv: string[]) {
   console.log(JSON.stringify(result, null, 2));
 }
 
-async function cmdFundBrowser() {
-  loadConfig();
-  console.error('Starting funding server...');
-  const { url } = await startFundingServer();
-  console.error(`\nFunding page ready: ${url}`);
-  console.error('Connect MetaMask in the browser to send tokens to your agent wallet.');
-  console.error('Press Ctrl+C to stop.\n');
-
-  // Open browser
-  const { exec } = await import('node:child_process');
-  const cmd = process.platform === 'darwin' ? 'open'
-    : process.platform === 'win32' ? 'start'
-    : 'xdg-open';
-  exec(`${cmd} "${url}"`);
-
-  // Keep process alive
-  await new Promise(() => {});
-}
-
 async function cmdStatus(argv: string[]) {
   const { positionals, values } = parseArgs({
     args: argv,
@@ -437,7 +416,6 @@ async function main() {
     case 'pay-mpp':   await cmdPayMpp(rest); break;
     case 'balance':   await cmdBalance(rest); break;
     case 'fund':         await cmdFund(rest); break;
-    case 'fund-browser': await cmdFundBrowser(); break;
     case 'status':       await cmdStatus(rest); break;
     case 'dashboard': await import('./dashboard/server.js'); break;
     default:

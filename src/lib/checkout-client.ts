@@ -424,6 +424,9 @@ export async function executeCheckoutFlow(params: {
         log('checkout_requote', { retry: retries });
         continue;
       }
+      // Cancel the stuck transaction so it doesn't stay in "signing" state
+      await cancelTransaction(apiBase, environmentId, session.transactionId, session.sessionToken)
+        .catch(() => {}); // best-effort
       throw err;
     }
   }

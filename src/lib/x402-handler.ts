@@ -494,7 +494,10 @@ export async function handleCoinbaseX402(
   if (paymentResponse) {
     try {
       const decoded = JSON.parse(Buffer.from(paymentResponse, 'base64').toString('utf-8'));
-      settlementHash = decoded.transaction ?? decoded.txHash ?? paymentResponse;
+      const hash = typeof decoded === 'object'
+        ? (decoded.txHash ?? decoded.transaction ?? paymentResponse)
+        : decoded;
+      settlementHash = typeof hash === 'string' ? hash : paymentResponse;
     } catch { /* keep raw */ }
   }
 

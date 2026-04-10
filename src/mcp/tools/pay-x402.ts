@@ -28,22 +28,28 @@ export async function payX402(
   });
 
   // Step 1: Make the request — expect 402
-  const initialRes = await fetch(input.url, {
-    method: input.method,
-    ...(input.body ? { body: input.body, headers: { 'Content-Type': 'application/json' } } : {}),
-  });
+  let initialRes: Response;
+  try {
+    initialRes = await fetch(input.url, {
+      method: input.method,
+      ...(input.body ? { body: input.body, headers: { 'Content-Type': 'application/json' } } : {}),
+    });
+  } catch (err: any) {
+    throw new Error(`Network error fetching ${input.url}: ${err.cause?.message ?? err.message}`);
+  }
 
   if (initialRes.ok) {
-    // Not a 402 — return the data directly
+    // Not a 402 — no payment needed
     const rawText = await initialRes.text();
     let data: unknown;
     try { data = JSON.parse(rawText); } catch { data = rawText; }
     return {
       settlementHash: '',
       accessGranted: true,
-      protocol: undefined,
+      protocol: 'none' as any,
+      noPaymentRequired: true,
       responseData: data,
-    };
+    } as any;
   }
 
   if (initialRes.status !== 402) {

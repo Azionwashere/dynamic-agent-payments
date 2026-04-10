@@ -220,25 +220,35 @@ export async function signAndBroadcastTransaction(
   const txReq = (payload.transactionRequest ?? payload) as any;
   const chainId = txReq.chainId?.toString() ?? '8453';
 
+  // Let Dynamic resolve the RPC URL from environment config — no hardcoding
   const walletClient = await (client as any).getWalletClient({
     accountAddress: wallet.accountAddress,
     chainId: parseInt(chainId),
-    rpcUrl: `https://${chainId === '8453' ? 'mainnet.base.org' : 'mainnet.base.org'}`,
   });
 
-  const txHash = await walletClient.sendTransaction({
-    to: txReq.to as `0x${string}`,
-    data: txReq.data as `0x${string}` | undefined,
-    value: BigInt(txReq.value || '0'),
-    gas: txReq.gasLimit ? BigInt(txReq.gasLimit) : undefined,
-    gasPrice: txReq.gasPrice ? BigInt(txReq.gasPrice) : undefined,
-    maxFeePerGas: txReq.maxFeePerGas ? BigInt(txReq.maxFeePerGas) : undefined,
-    maxPriorityFeePerGas: txReq.maxPriorityFeePerGas ? BigInt(txReq.maxPriorityFeePerGas) : undefined,
-    type: txReq.maxFeePerGas ? 'eip1559' as const : 'legacy' as const,
-    chainId: parseInt(chainId),
-  });
+  try {
+    const txHash = await walletClient.sendTransaction({
+      to: txReq.to as `0x${string}`,
+      data: txReq.data as `0x${string}` | undefined,
+      value: BigInt(txReq.value || '0'),
+      gas: txReq.gasLimit ? BigInt(txReq.gasLimit) : undefined,
+      gasPrice: txReq.gasPrice ? BigInt(txReq.gasPrice) : undefined,
+      maxFeePerGas: txReq.maxFeePerGas ? BigInt(txReq.maxFeePerGas) : undefined,
+      maxPriorityFeePerGas: txReq.maxPriorityFeePerGas ? BigInt(txReq.maxPriorityFeePerGas) : undefined,
+      type: txReq.maxFeePerGas ? 'eip1559' as const : 'legacy' as const,
+      chainId: parseInt(chainId),
+    });
 
-  return txHash;
+    return txHash;
+  } catch (err: any) {
+    if (err.message?.includes('insufficient funds') || err.message?.includes('exceeds the balance')) {
+      throw new Error(
+        `Insufficient native token for gas on chain ${chainId}. ` +
+        `Send ETH (or the chain's native token) to ${wallet.accountAddress} to cover gas fees.`
+      );
+    }
+    throw err;
+  }
 }
 
 /**
