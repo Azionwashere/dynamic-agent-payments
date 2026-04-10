@@ -90,7 +90,11 @@ Optional:
 const STATUS_USAGE = `
 Usage: dynamic-agent-payments status <txId>
 
-Check the status of a Checkout API transaction.
+Check the status of a Checkout API transaction (from the fund command).
+The txId must be a UUID (e.g. a1b2c3d4-e5f6-7890-abcd-ef1234567890).
+
+Note: This only tracks Checkout API transactions (fund). For x402 payment
+status (pay), check the txHash in the command output or the dashboard.
 `.trim();
 
 function fatal(msg: string): never {
@@ -183,7 +187,7 @@ async function cmdPay(argv: string[]) {
     allowPositionals: true,
   });
 
-  if (values.help) { console.error(PAY_USAGE); process.exit(0); }
+  if (values.help) { console.log(PAY_USAGE); process.exit(0); }
 
   const url = positionals[0];
   if (!url) fatal('Missing URL. Usage: dynamic-agent-payments pay <url>');
@@ -216,7 +220,7 @@ async function cmdPayMpp(argv: string[]) {
     allowPositionals: true,
   });
 
-  if (values.help) { console.error(PAY_MPP_USAGE); process.exit(0); }
+  if (values.help) { console.log(PAY_MPP_USAGE); process.exit(0); }
 
   const url = positionals[0];
   if (!url) fatal('Missing URL. Usage: dynamic-agent-payments pay-mpp <url>');
@@ -307,7 +311,7 @@ async function cmdBalance(argv: string[]) {
     },
   });
 
-  if (values.help) { console.error(BALANCE_USAGE); process.exit(0); }
+  if (values.help) { console.log(BALANCE_USAGE); process.exit(0); }
 
   const chain = (values.chain?.toUpperCase() ?? 'EVM') as 'EVM' | 'SOL';
   if (chain !== 'EVM' && chain !== 'SOL') fatal('--chain must be EVM or SOL');
@@ -343,7 +347,7 @@ async function cmdFund(argv: string[]) {
     },
   });
 
-  if (values.help) { console.error(FUND_USAGE); process.exit(0); }
+  if (values.help) { console.log(FUND_USAGE); process.exit(0); }
 
   const required = ['amount', 'from-chain-id', 'from-token', 'to-chain-id', 'to-token-address'] as const;
   for (const key of required) {
@@ -390,7 +394,7 @@ async function cmdStatus(argv: string[]) {
     allowPositionals: true,
   });
 
-  if (values.help) { console.error(STATUS_USAGE); process.exit(0); }
+  if (values.help) { console.log(STATUS_USAGE); process.exit(0); }
 
   const txId = positionals[0];
   if (!txId) fatal('Missing transaction ID. Usage: dynamic-agent-payments status <txId>');
@@ -406,7 +410,7 @@ async function main() {
   const [command, ...rest] = process.argv.slice(2);
 
   if (!command || command === '--help' || command === '-h') {
-    console.error(USAGE);
+    console.log(USAGE);
     process.exit(0);
   }
 

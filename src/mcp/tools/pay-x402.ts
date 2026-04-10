@@ -60,18 +60,13 @@ export async function payX402(
   const headers: Record<string, string> = {};
   initialRes.headers.forEach((v, k) => { headers[k] = v; });
 
-  const protocol = detectProtocol(headers);
-
-  if (emit) emitEvent(emit, 'x402_detected', {
-    protocol,
-    url: input.url,
-    ...(input.memo ? { memo: input.memo } : {}),
-  });
+  const headerProtocol = detectProtocol(headers);
 
   // Step 3: Handle based on protocol
 
   // MPP Protocol (WWW-Authenticate: Payment)
-  if (protocol === 'mpp') {
+  if (headerProtocol === 'mpp') {
+    if (emit) emitEvent(emit, 'x402_detected', { protocol: 'mpp', url: input.url, ...(input.memo ? { memo: input.memo } : {}) });
     const mppResult = await handleMppPaywall(headers['www-authenticate']!);
     if (!mppResult) throw new Error('Failed to parse MPP challenge');
 
@@ -101,15 +96,16 @@ export async function payX402(
   }
 
   // x402 Protocol (JSON body with accepts[])
-  if (protocol === 'x402-coinbase' || protocol === 'none') {
-    // Try parsing the response body for x402 payment requirements
+  if (headerProtocol === 'x402-coinbase' || headerProtocol === 'none') {
     const body = await initialRes.json().catch(() => null);
 
     if (body?.accepts?.length > 0) {
+      if (emit) emitEvent(emit, 'x402_detected', { protocol: 'x402-coinbase', url: input.url, ...(input.memo ? { memo: input.memo } : {}) });
       const result = await handleCoinbaseX402(input.url, body.accepts[0], input.method, input.body, body.resource);
 
       if (emit) emitEvent(emit, 'x402_complete', {
         protocol: 'x402-coinbase',
+        txHash: result.settlementHash,
         status: result.accessGranted ? 200 : 402,
         accessGranted: result.accessGranted,
         ...(input.memo ? { memo: input.memo } : {}),

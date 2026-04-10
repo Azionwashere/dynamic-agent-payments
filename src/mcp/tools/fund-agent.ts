@@ -21,8 +21,19 @@ export const fundAgentSchema = z.object({
 
 export type FundAgentInput = z.infer<typeof fundAgentSchema>;
 
-// Cache checkout IDs per destination chain
-const checkoutCache = new Map<string, string>();
+// Cache checkout IDs per destination chain (with 1-hour TTL)
+const CHECKOUT_TTL_MS = 60 * 60 * 1000;
+const checkoutCache = new Map<string, { id: string; createdAt: number }>();
+
+function getCachedCheckout(key: string): string | undefined {
+  const entry = checkoutCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.createdAt > CHECKOUT_TTL_MS) {
+    checkoutCache.delete(key);
+    return undefined;
+  }
+  return entry.id;
+}
 
 export async function fundAgent(
   input: FundAgentInput,
@@ -44,7 +55,7 @@ export async function fundAgent(
 
   // Get or create checkout for this destination chain
   const cacheKey = `${input.toChainId}-${input.toTokenAddress}`;
-  let checkoutId = checkoutCache.get(cacheKey);
+  let checkoutId = getCachedCheckout(cacheKey);
 
   if (!checkoutId) {
     if (emit) emitEvent(emit, 'fund_creating_checkout', { toChain: toChainName });
@@ -59,7 +70,7 @@ export async function fundAgent(
       settlementTokenDecimals: input.toTokenDecimals,
       destinationAddress: destAddress,
     });
-    checkoutCache.set(cacheKey, checkoutId);
+    checkoutCache.set(cacheKey, { id: checkoutId, createdAt: Date.now() });
   }
 
   // Execute the full checkout flow

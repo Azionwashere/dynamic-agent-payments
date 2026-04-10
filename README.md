@@ -69,8 +69,8 @@ npx dynamic-agent-payments wallet list
 # Switch to a different wallet
 npx dynamic-agent-payments wallet use 0xYourAddress
 
-# Check wallet balances
-npx dynamic-agent-payments balance
+# Check wallet balances (filter by chain with --network-id)
+npx dynamic-agent-payments balance --network-id 8453   # Base only
 
 # Pay for a Coinbase x402-protected resource
 npx dynamic-agent-payments pay https://x402-api.fly.dev/api/price-feed
@@ -83,8 +83,8 @@ npx dynamic-agent-payments fund --amount 5.00 \
   --from-chain-id 1 --from-token 0x0000...0000 \
   --to-chain-id 8453 --to-token-address 0x8335...2913
 
-# Check transaction status
-npx dynamic-agent-payments status tx_abc123
+# Check fund transaction status (UUID from fund output)
+npx dynamic-agent-payments status a1b2c3d4-e5f6-7890-abcd-ef1234567890
 
 # Live activity dashboard
 npx dynamic-agent-payments dashboard
@@ -115,20 +115,24 @@ Run `wallet` to create your agent's wallet (saved to `.env`). Fund it with any t
 
 For Claude Code users, this also ships as an MCP server:
 
-Add to Claude Code settings (`~/.claude/settings.json`):
+First, build the project and set up your `.env` (see Quick Start above).
+
+Add the MCP server to your Claude Code config (`~/.claude.json` or project `.mcp.json`):
 ```json
 {
   "mcpServers": {
     "dynamic-agent-payments": {
       "command": "node",
-      "args": ["/path/to/dynamic-agent-payments/dist/mcp/server.js"],
-      "cwd": "/path/to/dynamic-agent-payments"
+      "args": ["dist/mcp/server.js"],
+      "cwd": "/absolute/path/to/dynamic-agent-payments"
     }
   }
 }
 ```
 
-Install the skill for auto-triggering on 402 responses:
+The MCP server exposes 5 tools: `pay_x402`, `get_wallets`, `check_balance`, `fund_agent`, `tx_status`.
+
+Optionally, install the skill for auto-triggering on 402 responses:
 ```bash
 cp -r skill/ ~/.claude/skills/agent-pay/
 ```

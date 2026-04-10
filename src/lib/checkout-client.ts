@@ -183,6 +183,9 @@ export async function prepareSigning(
     {
       method: 'POST',
       headers: { [SESSION_HEADER]: sessionToken },
+      // NOTE: assertBalanceForGasCost may not be enforced server-side for native
+      // gas tokens. The client-side signAndBroadcastTransaction handles this with
+      // a human-readable error if viem detects insufficient gas at broadcast time.
       body: JSON.stringify({
         assertBalanceForGasCost: true,
         assertBalanceForTransferAmount: true,
