@@ -10,6 +10,7 @@ import { fundAgent } from './mcp/tools/fund-agent.js';
 import { getTxStatus } from './mcp/tools/tx-status.js';
 import { detectProtocol, parseMppChallenges, selectChallenge, handleMppPaywall } from './lib/x402-handler.js';
 import { emitEvent } from './lib/events.js';
+import { permit2Approve, permit2Sign, permit2Verify, checkPermit2Allowance, TOKENS, PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY } from './lib/permit2.js';
 
 const USAGE = `
 dynamic-agent-payments — CLI for x402 payments via Dynamic wallets
@@ -22,6 +23,9 @@ Commands:
   pay <url>          Pay for an x402-protected resource
   pay-mpp <url>      Pay for an MPP-protected resource
   fund               Fund wallet via checkout swap/bridge
+  permit2 approve    One-time Permit2 token approval
+  permit2 sign       Sign a Permit2 payment (off-chain)
+  permit2 verify     Verify a Permit2 signature
   status <txId>      Check transaction status
   dashboard          Open live activity dashboard
 
@@ -406,6 +410,143 @@ async function cmdStatus(argv: string[]) {
   console.log(JSON.stringify(result, null, 2));
 }
 
+async function cmdPermit2(argv: string[]) {
+  loadConfig();
+  const sub = argv[0];
+
+  if (sub === 'approve') {
+    const { values } = parseArgs({
+      args: argv.slice(1),
+      options: {
+        token: { type: 'string', short: 't', default: 'USDC' },
+        'chain-id': { type: 'string', default: '8453' },
+      },
+    });
+
+    const chainId = values['chain-id']!;
+    const tokenKey = `${values.token!.toUpperCase()}:${chainId}`;
+    const token = TOKENS[tokenKey];
+    if (!token) fatal(`Unknown token ${tokenKey}. Available: ${Object.keys(TOKENS).join(', ')}`);
+
+    // Check current allowance
+    console.error(`Checking Permit2 allowance for ${token.name} on chain ${chainId}...`);
+    const { allowance, hasApproval } = await checkPermit2Allowance(token.address);
+
+    if (hasApproval) {
+      console.log(JSON.stringify({
+        status: 'already_approved',
+        token: token.name,
+        tokenAddress: token.address,
+        permit2: PERMIT2_ADDRESS,
+        allowance,
+      }, null, 2));
+      return;
+    }
+
+    console.error(`Approving Permit2 to spend ${token.name}...`);
+    const result = await permit2Approve(token.address, chainId);
+    console.log(JSON.stringify({ status: 'approved', ...result }, null, 2));
+    return;
+  }
+
+  if (sub === 'sign') {
+    const { values } = parseArgs({
+      args: argv.slice(1),
+      options: {
+        token: { type: 'string', short: 't', default: 'USDC' },
+        amount: { type: 'string', short: 'a' },
+        to: { type: 'string' },
+        'chain-id': { type: 'string', default: '8453' },
+        deadline: { type: 'string', default: '60' },
+      },
+    });
+
+    if (!values.amount) fatal('Missing --amount');
+    if (!values.to) fatal('Missing --to (recipient address)');
+
+    const chainId = parseInt(values['chain-id']!, 10);
+    const tokenKey = `${values.token!.toUpperCase()}:${chainId}`;
+    const token = TOKENS[tokenKey];
+    if (!token) fatal(`Unknown token ${tokenKey}. Available: ${Object.keys(TOKENS).join(', ')}`);
+
+    // Check allowance first
+    const { hasApproval } = await checkPermit2Allowance(token.address);
+    if (!hasApproval) {
+      fatal(`No Permit2 allowance for ${token.name}. Run: dynamic-agent-payments permit2 approve --token ${token.name}`);
+    }
+
+    console.error(`Signing Permit2 PermitWitnessTransferFrom...`);
+    console.error(`  Token: ${token.name} (${token.address})`);
+    console.error(`  Amount: ${values.amount} (${parseInt(values.amount) / 10 ** token.decimals} ${token.name})`);
+    console.error(`  To: ${values.to}`);
+    console.error(`  Spender (proxy): ${X402_EXACT_PERMIT2_PROXY}`);
+
+    const result = await permit2Sign({
+      tokenAddress: token.address,
+      amount: values.amount,
+      recipient: values.to,
+      chainId,
+      deadlineSeconds: parseInt(values.deadline!, 10),
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (sub === 'verify') {
+    // Read signed payload from stdin or a previous sign output
+    const { values, positionals } = parseArgs({
+      args: argv.slice(1),
+      options: {
+        'chain-id': { type: 'string', default: '8453' },
+      },
+      allowPositionals: true,
+    });
+
+    const jsonArg = positionals[0];
+    let signResult;
+
+    if (jsonArg) {
+      signResult = JSON.parse(jsonArg);
+    } else {
+      // Read from stdin
+      console.error('Paste the JSON output from `permit2 sign`, then press Ctrl+D:');
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(chunk);
+      signResult = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+    }
+
+    console.error('Verifying Permit2 signature...');
+    const result = await permit2Verify(signResult, parseInt(values['chain-id']!, 10));
+    console.log(JSON.stringify({
+      valid: result.valid,
+      recoveredSigner: result.recoveredSigner,
+      expectedSigner: result.expectedSigner,
+      match: result.recoveredSigner.toLowerCase() === result.expectedSigner.toLowerCase(),
+    }, null, 2));
+    return;
+  }
+
+  // Default: show status
+  console.log(`
+permit2 — Permit2 operations for universal ERC-20 payments
+
+Subcommands:
+  approve   One-time approval of Permit2 to spend a token
+  sign      Sign a PermitWitnessTransferFrom (off-chain, gasless)
+  verify    Verify a Permit2 signature recovers to your wallet
+
+Examples:
+  permit2 approve --token USDC
+  permit2 sign --token USDC --amount 1000 --to 0xRecipient
+  permit2 sign ... | permit2 verify
+
+Options (all subcommands):
+  --token, -t     Token symbol (default: USDC)
+  --chain-id      Chain ID (default: 8453 / Base)
+`.trim());
+}
+
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
 
@@ -420,6 +561,7 @@ async function main() {
     case 'pay-mpp':   await cmdPayMpp(rest); break;
     case 'balance':   await cmdBalance(rest); break;
     case 'fund':         await cmdFund(rest); break;
+    case 'permit2':      await cmdPermit2(rest); break;
     case 'status':       await cmdStatus(rest); break;
     case 'dashboard': await import('./dashboard/server.js'); break;
     default:

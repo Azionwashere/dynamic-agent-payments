@@ -15,6 +15,22 @@ let _svmAuthenticated = false;
 
 const walletCache = new Map<string, WalletInfo>();
 
+/** Public RPC endpoints per chain. Override with RPC_URL env var. */
+const PUBLIC_RPCS: Record<string, string> = {
+  '1': 'https://eth.llamarpc.com',
+  '8453': 'https://mainnet.base.org',
+  '84532': 'https://sepolia.base.org',
+  '137': 'https://polygon-rpc.com',
+  '42161': 'https://arb1.arbitrum.io/rpc',
+  '10': 'https://mainnet.optimism.io',
+  '43114': 'https://api.avax.network/ext/bc/C/rpc',
+  '43113': 'https://api.avax-test.network/ext/bc/C/rpc',
+};
+
+function getPublicRpc(chainId: string): string {
+  return process.env.RPC_URL || PUBLIC_RPCS[chainId] || `https://mainnet.base.org`;
+}
+
 async function getEvmClient(): Promise<DynamicEvmWalletClient> {
   if (_evmClient && _evmAuthenticated) return _evmClient;
   const config = loadConfig();
@@ -220,10 +236,10 @@ export async function signAndBroadcastTransaction(
   const txReq = (payload.transactionRequest ?? payload) as any;
   const chainId = txReq.chainId?.toString() ?? '8453';
 
-  // Let Dynamic resolve the RPC URL from environment config — no hardcoding
   const walletClient = await (client as any).getWalletClient({
     accountAddress: wallet.accountAddress,
     chainId: parseInt(chainId),
+    rpcUrl: getPublicRpc(chainId),
   });
 
   try {
