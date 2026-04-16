@@ -164,11 +164,13 @@ function handleEvent(data) {
       setStep('s-402', 'active');
       setStep('s-sign', 'active');
 
-      const payload = `2\n${data.accept?.scheme || 'exact'}\n${data.network}\n${data.amount}\n${data.accept?.asset || '...'}\n${data.payTo}`;
+      const usdcFormatted = (parseInt(data.amount) / 1e6).toFixed(4);
+      const payload = `2\n${data.accept?.scheme || 'exact'}\n${data.network}\n${data.amount} (${usdcFormatted} USDC)\n${data.accept?.asset || '...'}\n${data.payTo}`;
       document.getElementById('canonical-payload').textContent = payload;
       document.getElementById('canonical-payload').className = 'payload-box visible';
+      const usdcAmount = (parseInt(data.amount) / 1e6).toFixed(4);
       document.getElementById('payment-details').innerHTML =
-        `Amount: ${data.amount} USDC<br>PayTo: ${data.payTo?.slice(0, 10)}...${data.payTo?.slice(-4)}<br>Network: ${data.network}` +
+        `Amount: ${usdcAmount} USDC ($${usdcAmount})<br>PayTo: ${data.payTo?.slice(0, 10)}...${data.payTo?.slice(-4)}<br>Network: ${data.network}` +
         (data.tampered ? '<br><span style="color:#f44336">TAMPERED payTo!</span>' : '');
 
       setTimeout(() => {
