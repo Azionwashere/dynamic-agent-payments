@@ -23,30 +23,57 @@
   .tag-safe { background: #112211; color: #4caf50; }
   .tag-attack { background: #331111; color: #f44336; }
 
-  .run-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
+  .run-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
   .btn-run { padding: 12px 32px; border: none; border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; background: #5b5bff; color: #fff; transition: all 0.15s; }
   .btn-run:hover:not(:disabled) { background: #4a4aee; }
   .btn-run:disabled { opacity: 0.3; cursor: not-allowed; }
   .run-hint { font-size: 13px; color: #555; }
 
   /* Step log */
-  .step-log { max-width: 800px; }
-  .log-entry { margin-bottom: 10px; border-left: 3px solid #222; padding: 14px 18px; background: #111; border-radius: 0 10px 10px 0; animation: fadeIn 0.3s ease; }
+  .step-log { margin-bottom: 28px; }
+  .log-entry { margin-bottom: 8px; border-left: 3px solid #222; padding: 12px 16px; background: #111; border-radius: 0 10px 10px 0; animation: fadeIn 0.3s ease; }
   .log-entry.success { border-left-color: #4caf50; }
   .log-entry.fail { border-left-color: #f44336; }
   .log-entry.active { border-left-color: #5b5bff; }
-  .log-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .log-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .log-icon { font-size: 16px; }
   .log-icon.success { color: #4caf50; }
   .log-icon.fail { color: #f44336; }
   .log-icon.active { color: #5b5bff; }
   .log-title { font-size: 14px; font-weight: 700; color: #fff; }
-  .log-body { font-size: 14px; color: #aaa; line-height: 1.6; }
+  .log-body { font-size: 13px; color: #aaa; line-height: 1.5; }
   .log-body code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: #ccc; background: #0a0a0a; padding: 2px 6px; border-radius: 4px; }
 
-  .final-banner { margin-top: 16px; padding: 20px; border-radius: 10px; font-size: 16px; font-weight: 700; text-align: center; animation: fadeIn 0.3s ease; }
+  .final-banner { margin-top: 12px; margin-bottom: 24px; padding: 18px; border-radius: 10px; font-size: 16px; font-weight: 700; text-align: center; animation: fadeIn 0.3s ease; }
   .final-banner.success { background: #0d1a0d; border: 2px solid #1a3a1a; color: #4caf50; }
   .final-banner.fail { background: #1a0d0d; border: 2px solid #3a1a1a; color: #f44336; }
+
+  /* Three columns */
+  .columns { display: grid; grid-template-columns: 1fr 40px 1fr 40px 1fr; gap: 0; margin-bottom: 24px; align-items: start; }
+  .col { background: #111; border: 1px solid #222; border-radius: 12px; padding: 20px; min-height: 280px; }
+  .col-header { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: #555; margin-bottom: 12px; }
+  .col-title { font-size: 15px; color: #fff; font-weight: 700; margin-bottom: 16px; }
+  .arrow-col { display: flex; align-items: center; justify-content: center; color: #333; font-size: 24px; padding-top: 80px; }
+  .arrow-col.lit { color: #5b5bff; }
+
+  .field { margin-bottom: 12px; }
+  .field-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; margin-bottom: 3px; }
+  .field-value { font-size: 13px; color: #888; word-break: break-all; font-family: 'SF Mono', 'Fira Code', monospace; }
+  .field-value.bright { color: #fff; }
+
+  .step { padding: 10px 14px; margin-bottom: 6px; border-radius: 8px; font-size: 13px; background: #0a0a0a; border: 1px solid #1a1a1a; transition: all 0.4s; display: flex; align-items: center; gap: 10px; }
+  .step .indicator { width: 10px; height: 10px; border-radius: 50%; background: #222; transition: all 0.4s; flex-shrink: 0; }
+  .step.waiting { }
+  .step.success { border-color: #1a3a1a; background: #0d1a0d; }
+  .step.success .indicator { background: #4caf50; }
+  .step.fail { border-color: #3a1a1a; background: #1a0d0d; }
+  .step.fail .indicator { background: #f44336; }
+  .step.active { border-color: #334; background: #0d0d2a; }
+  .step.active .indicator { background: #5b5bff; box-shadow: 0 0 8px #5b5bff; }
+
+  .result-banner { padding: 14px 18px; border-radius: 10px; font-size: 14px; font-weight: 700; text-align: center; display: none; margin-top: 10px; }
+  .result-banner.success { display: block; background: #0d1a0d; border: 1px solid #1a3a1a; color: #4caf50; }
+  .result-banner.fail { display: block; background: #1a0d0d; border: 1px solid #3a1a1a; color: #f44336; }
 
   .terminal-prompt { display: none; margin-top: 20px; max-width: 800px; }
   .terminal-prompt.visible { display: block; }
@@ -86,18 +113,72 @@
   <span class="run-hint" id="run-hint">Select a scenario above to begin</span>
 </div>
 
+<!-- Step log (top) -->
 <div class="step-log" id="step-log"></div>
+
+<!-- Three columns (below) -->
+<div class="columns" id="columns">
+  <div class="col">
+    <div class="col-header">1. SERVICE PROVIDER</div>
+    <div class="col-title">x402 Resource Server</div>
+    <div class="field">
+      <div class="field-label">Identity</div>
+      <div class="field-value bright" id="server-did">—</div>
+    </div>
+    <div class="field">
+      <div class="field-label">Signing Key</div>
+      <div class="field-value">ES256 (P-256)</div>
+    </div>
+    <div class="step waiting" id="s-402"><span class="indicator"></span>Receive request</div>
+    <div class="step waiting" id="s-sign"><span class="indicator"></span>Sign payment instruction</div>
+    <div class="step waiting" id="s-send"><span class="indicator"></span>Return 402 + X-402-Integrity</div>
+  </div>
+
+  <div class="arrow-col" id="arrow-1">&rarr;</div>
+
+  <div class="col">
+    <div class="col-header">2. AGENT</div>
+    <div class="col-title">Dynamic Agent Payments</div>
+    <div class="step waiting" id="a-request"><span class="indicator"></span>Request paid resource</div>
+    <div class="step waiting" id="a-receive"><span class="indicator"></span>Parse 402 + integrity header</div>
+    <div class="step waiting" id="a-resolve"><span class="indicator"></span>Fetch DID document from server</div>
+    <div class="step waiting" id="a-verify"><span class="indicator"></span>Verify signature over payment fields</div>
+    <div class="result-banner" id="agent-result"></div>
+  </div>
+
+  <div class="arrow-col" id="arrow-2">&rarr;</div>
+
+  <div class="col">
+    <div class="col-header">3. WALLET</div>
+    <div class="col-title">Dynamic MPC Wallet</div>
+    <div class="field">
+      <div class="field-label">Payment</div>
+      <div class="field-value" id="payment-details">Waiting for verified instruction...</div>
+    </div>
+    <div class="step waiting" id="w-check"><span class="indicator"></span>Instruction integrity confirmed?</div>
+    <div class="step waiting" id="w-sign"><span class="indicator"></span>Sign EIP-712 payment</div>
+    <div class="result-banner" id="wallet-result"></div>
+  </div>
+</div>
+
 <div class="terminal-prompt" id="terminal-prompt">
   <div class="terminal-label">Now run in terminal</div>
   <div class="terminal-box">
     <span class="prompt">$ </span><span class="cmd" id="terminal-cmd"></span>
-    <div class="note" id="terminal-note">Try it from the CLI to see the full JSON output</div>
+    <div class="note">Try it from the CLI to see the full JSON output</div>
   </div>
 </div>
 <span class="reset-link" id="reset-link" onclick="resetUI()">Reset demo</span>
 
 <script>
+const NETWORK_NAMES = { 'eip155:8453': 'Base', 'eip155:1': 'Ethereum', 'eip155:84532': 'Base Sepolia', 'eip155:137': 'Polygon' };
+const ALL_STEPS = ['s-402','s-sign','s-send','a-request','a-receive','a-resolve','a-verify','w-check','w-sign'];
 let selectedTamper = null;
+
+function setStep(id, state) {
+  const el = document.getElementById(id);
+  if (el) el.className = 'step ' + state;
+}
 
 function selectScenario(tamper) {
   selectedTamper = tamper;
@@ -113,6 +194,13 @@ function resetUI() {
   document.getElementById('step-log').innerHTML = '';
   document.getElementById('terminal-prompt').className = 'terminal-prompt';
   document.getElementById('reset-link').className = 'reset-link';
+  ALL_STEPS.forEach(s => setStep(s, 'waiting'));
+  document.getElementById('agent-result').className = 'result-banner';
+  document.getElementById('wallet-result').className = 'result-banner';
+  document.getElementById('arrow-1').className = 'arrow-col';
+  document.getElementById('arrow-2').className = 'arrow-col';
+  document.getElementById('payment-details').textContent = 'Waiting for verified instruction...';
+  document.getElementById('server-did').textContent = '—';
   document.getElementById('btn-legit').disabled = false;
   document.getElementById('btn-tamper').disabled = false;
   document.getElementById('btn-legit').className = 'scenario-btn';
@@ -126,12 +214,17 @@ async function runSelected() {
   if (selectedTamper === null) return;
   const tamper = selectedTamper;
 
-  // Clear previous run
+  // Clear previous
   document.getElementById('step-log').innerHTML = '';
   document.getElementById('terminal-prompt').className = 'terminal-prompt';
   document.getElementById('reset-link').className = 'reset-link';
+  ALL_STEPS.forEach(s => setStep(s, 'waiting'));
+  document.getElementById('agent-result').className = 'result-banner';
+  document.getElementById('wallet-result').className = 'result-banner';
+  document.getElementById('arrow-1').className = 'arrow-col';
+  document.getElementById('arrow-2').className = 'arrow-col';
+  document.getElementById('payment-details').textContent = 'Waiting for verified instruction...';
 
-  // Disable controls
   document.getElementById('btn-legit').disabled = true;
   document.getElementById('btn-tamper').disabled = true;
   document.getElementById('btn-run').disabled = true;
@@ -160,44 +253,92 @@ evtSource.onmessage = (e) => {
   const data = JSON.parse(e.data);
   if (data.event !== 'step') return;
 
+  // Add to step log
   addStep(data.num, data.title, data.body, data.state);
 
-  if (data.final) {
-    const log = document.getElementById('step-log');
-    const banner = document.createElement('div');
-    banner.className = 'final-banner ' + data.final;
-    banner.textContent = data.final === 'success'
-      ? 'PAYMENT INSTRUCTION VERIFIED'
-      : 'TAMPER DETECTED — PAYMENT BLOCKED';
-    log.appendChild(banner);
-
-    // Show terminal
-    const isTamper = document.getElementById('btn-tamper').className.includes('active-bad');
-    document.getElementById('terminal-cmd').textContent = isTamper
-      ? 'node dist/cli.js pay "http://localhost:3402/paid-content?tamper=true" --require-integrity'
-      : 'node dist/cli.js pay http://localhost:3402/paid-content --require-integrity';
-    document.getElementById('terminal-prompt').className = 'terminal-prompt visible';
-    document.getElementById('reset-link').className = 'reset-link visible';
-    document.getElementById('btn-legit').disabled = false;
-    document.getElementById('btn-tamper').disabled = false;
-  }
+  // Update 3-column indicators
+  updateColumns(data);
 };
 
 function addStep(num, title, body, state) {
   const log = document.getElementById('step-log');
   const entry = document.createElement('div');
   entry.className = 'log-entry ' + state;
-
-  const icon = state === 'fail' ? '&#10007;'
-    : state === 'success' ? '&#10003;'
-    : '&#9679;';
-  const iconClass = state;
-
+  const icon = state === 'fail' ? '&#10007;' : state === 'success' ? '&#10003;' : '&#9679;';
   entry.innerHTML =
-    `<div class="log-header"><span class="log-icon ${iconClass}">${icon}</span><span class="log-title">Step ${num}: ${title}</span></div>` +
+    `<div class="log-header"><span class="log-icon ${state}">${icon}</span><span class="log-title">Step ${num}: ${title}</span></div>` +
     `<div class="log-body">${body}</div>`;
   log.appendChild(entry);
-  entry.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function updateColumns(data) {
+  const n = data.num;
+
+  // Step 1: Agent requests
+  if (n === 1) {
+    setStep('a-request', 'success');
+    document.getElementById('arrow-1').className = 'arrow-col lit';
+  }
+
+  // Step 2: Server returns signed 402
+  if (n === 2) {
+    setStep('s-402', 'success');
+    setStep('s-sign', 'success');
+    setStep('s-send', 'success');
+    setStep('a-receive', 'success');
+    if (data.payTo) {
+      const network = NETWORK_NAMES[data.network] || data.network;
+      const usdcAmount = (parseInt(data.amount || '0') / 1e6).toFixed(4);
+      document.getElementById('payment-details').innerHTML =
+        `<strong>${usdcAmount} USDC</strong> on ${network}<br>` +
+        `To: <span style="font-size:12px">${data.payTo?.slice(0, 14)}...${data.payTo?.slice(-6)}</span>` +
+        (data.tampered ? '<br><span style="color:#f44336;font-weight:700">payTo SWAPPED</span>' : '');
+    }
+  }
+
+  // Step 3: Resolve DID
+  if (n === 3) {
+    setStep('a-resolve', 'success');
+    if (data.did) document.getElementById('server-did').textContent = data.did;
+  }
+
+  // Step 4: Verify signature
+  if (n === 4) {
+    setStep('a-verify', 'active');
+  }
+
+  // Step 5: Result
+  if (n === 5 && data.final === 'success') {
+    setStep('a-verify', 'success');
+    document.getElementById('arrow-2').className = 'arrow-col lit';
+    setStep('w-check', 'success');
+    setStep('w-sign', 'success');
+    document.getElementById('agent-result').className = 'result-banner success';
+    document.getElementById('agent-result').textContent = 'INTEGRITY VERIFIED';
+    document.getElementById('wallet-result').className = 'result-banner success';
+    document.getElementById('wallet-result').textContent = 'Safe to sign payment';
+    showDone();
+  }
+  if (n === 5 && data.final === 'fail') {
+    setStep('a-verify', 'fail');
+    setStep('w-check', 'fail');
+    document.getElementById('agent-result').className = 'result-banner fail';
+    document.getElementById('agent-result').textContent = 'TAMPER DETECTED';
+    document.getElementById('wallet-result').className = 'result-banner fail';
+    document.getElementById('wallet-result').textContent = 'Wallet refuses to sign';
+    showDone();
+  }
+}
+
+function showDone() {
+  const isTamper = document.getElementById('btn-tamper').className.includes('active-bad');
+  document.getElementById('terminal-cmd').textContent = isTamper
+    ? 'node dist/cli.js pay "http://localhost:3402/paid-content?tamper=true" --require-integrity'
+    : 'node dist/cli.js pay http://localhost:3402/paid-content --require-integrity';
+  document.getElementById('terminal-prompt').className = 'terminal-prompt visible';
+  document.getElementById('reset-link').className = 'reset-link visible';
+  document.getElementById('btn-legit').disabled = false;
+  document.getElementById('btn-tamper').disabled = false;
 }
 </script>
 </body>
