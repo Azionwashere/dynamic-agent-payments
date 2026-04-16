@@ -29,12 +29,22 @@
   .tag-safe { background: #112211; color: #4caf50; }
   .tag-attack { background: #331111; color: #f44336; }
 
-  /* Narration */
-  .narration { background: #111; border: 1px solid #222; border-radius: 10px; padding: 20px; margin-bottom: 28px; min-height: 60px; display: none; }
-  .narration.visible { display: block; }
-  .narration-step { font-size: 12px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-  .narration-text { font-size: 15px; color: #ddd; line-height: 1.5; }
-  .narration-text .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; color: #aaa; background: #0a0a0a; padding: 2px 6px; border-radius: 4px; }
+  /* Narration log */
+  .narration-log { margin-bottom: 28px; display: none; }
+  .narration-log.visible { display: block; }
+  .narration-entry { background: #111; border: 1px solid #222; border-radius: 10px; padding: 16px 20px; margin-bottom: 8px; animation: fadeIn 0.3s ease; }
+  .narration-entry.success { border-left: 3px solid #4caf50; }
+  .narration-entry.fail { border-left: 3px solid #f44336; }
+  .narration-entry.active { border-left: 3px solid #5b5bff; }
+  .narration-step { font-size: 12px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .narration-step .check { color: #4caf50; }
+  .narration-step .cross { color: #f44336; }
+  .narration-step .spin { color: #5b5bff; }
+  .narration-text { font-size: 14px; color: #bbb; line-height: 1.5; }
+  .narration-text .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: #aaa; background: #0a0a0a; padding: 2px 6px; border-radius: 4px; }
+  .narration-text .bad { color: #f44336; font-weight: 700; }
+  .narration-text .good { color: #4caf50; font-weight: 700; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
   /* Columns */
   .columns { display: grid; grid-template-columns: 1fr 40px 1fr 40px 1fr; gap: 0; margin-bottom: 32px; align-items: start; }
@@ -103,11 +113,8 @@
   <span class="run-hint" id="run-hint">Select a scenario above to begin</span>
 </div>
 
-<!-- Narration bar -->
-<div class="narration" id="narration">
-  <div class="narration-step" id="narration-label">—</div>
-  <div class="narration-text" id="narration-text">—</div>
-</div>
+<!-- Narration log -->
+<div class="narration-log" id="narration-log"></div>
 
 <!-- Three columns -->
 <div class="columns">
@@ -187,11 +194,29 @@ function setStep(id, state) {
   if (el) el.className = 'step ' + state;
 }
 
-function narrate(label, text) {
-  const box = document.getElementById('narration');
-  box.className = 'narration visible';
-  document.getElementById('narration-label').textContent = label;
-  document.getElementById('narration-text').innerHTML = text;
+function narrate(label, text, state) {
+  const log = document.getElementById('narration-log');
+  log.className = 'narration-log visible';
+
+  // Mark previous entry as complete if it was active
+  const prev = log.querySelector('.narration-entry.active');
+  if (prev) {
+    prev.className = 'narration-entry success';
+    const stepEl = prev.querySelector('.narration-step');
+    if (stepEl) stepEl.innerHTML = stepEl.innerHTML.replace('<span class="spin">...</span>', '<span class="check">&#10003;</span>');
+  }
+
+  const entry = document.createElement('div');
+  const s = state || 'active';
+  entry.className = 'narration-entry ' + s;
+
+  const icon = s === 'fail' ? '<span class="cross">&#10007;</span>'
+    : s === 'success' ? '<span class="check">&#10003;</span>'
+    : '<span class="spin">...</span>';
+
+  entry.innerHTML = `<div class="narration-step">${icon} ${label}</div><div class="narration-text">${text}</div>`;
+  log.appendChild(entry);
+  entry.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function resetUI() {
@@ -201,6 +226,8 @@ function resetUI() {
   document.getElementById('narration').className = 'narration';
   document.getElementById('payment-details').textContent = 'Waiting for verified instruction...';
   document.getElementById('reset-link').className = 'reset-link';
+  document.getElementById('narration-log').innerHTML = '';
+  document.getElementById('narration-log').className = 'narration-log';
   document.getElementById('arrow-1').className = 'arrow-col';
   document.getElementById('arrow-2').className = 'arrow-col';
   document.getElementById('btn-legit').disabled = false;
@@ -266,7 +293,11 @@ function handleEvent(data) {
         document.getElementById('btn-legit').className = 'scenario-btn active-good';
       }
       setStep('a-request', 'active');
-      narrate('Step 1 of 5', 'Agent requests a paid resource from the server...');
+      narrate('Step 1 of 5',
+        isTamper
+          ? 'Agent requests a paid resource from the server. A malicious plugin is running inside the agent runtime, waiting to intercept the payment instruction...'
+          : 'Agent requests a paid resource from the server...'
+      );
       setTimeout(() => {
         setStep('a-request', 'success');
         document.getElementById('arrow-1').className = 'arrow-col lit';
@@ -280,8 +311,13 @@ function handleEvent(data) {
       setStep('s-402', 'success');
       setStep('s-sign', 'active');
       narrate('Step 2 of 5',
-        `Server returns <strong>402 Payment Required</strong>. Wants <span class="mono">${usdcAmount} USDC</span> on <strong>${network}</strong>.` +
-        `<br>Server signs the payment fields (payTo, amount, network) with its ES256 private key and includes the signature in the <span class="mono">X-402-Integrity</span> header.`
+        isTamper
+          ? `Server returns <strong>402 Payment Required</strong>. Wants <span class="mono">${usdcAmount} USDC</span> on <strong>${network}</strong>, ` +
+            `paid to the merchant's real address. The server signs these fields with its ES256 private key. ` +
+            `<br><br><span class="bad">But the malicious plugin intercepts the response and swaps the payTo address to the attacker's wallet.</span> ` +
+            `The signature still contains the original address — this mismatch is what integrity verification will catch.`
+          : `Server returns <strong>402 Payment Required</strong>. Wants <span class="mono">${usdcAmount} USDC</span> on <strong>${network}</strong>.` +
+            `<br>Server signs the payment fields (payTo, amount, network) with its ES256 private key and includes the signature in the <span class="mono">X-402-Integrity</span> header.`
       );
 
       document.getElementById('payment-details').innerHTML =
@@ -296,8 +332,12 @@ function handleEvent(data) {
           setStep('s-send', 'success');
           setStep('a-receive', 'active');
           narrate('Step 3 of 5',
-            'Agent receives the 402 response and sees the <span class="mono">X-402-Integrity</span> header. ' +
-            'Now it needs to verify the signature before trusting these payment instructions.'
+            isTamper
+              ? 'Agent receives the 402 response with the <span class="mono">X-402-Integrity</span> header. ' +
+                'The payment instruction now contains the <span class="bad">attacker\'s address</span>, but the integrity signature was computed over the <span class="good">merchant\'s real address</span>. ' +
+                'The agent doesn\'t know about the swap yet — it will check the signature next.'
+              : 'Agent receives the 402 response and sees the <span class="mono">X-402-Integrity</span> header. ' +
+                'Now it needs to verify the signature before trusting these payment instructions.'
           );
         }, 500);
       }, 800);
@@ -320,9 +360,12 @@ function handleEvent(data) {
       setStep('a-verify', 'active');
       narrate('Step 4 of 5',
         isTamper
-          ? 'Agent reconstructs the canonical payload from the 402 response and checks the signature. ' +
-            'But the <strong>payTo address was swapped</strong> by the compromised agent — the hash won\'t match what the server signed...'
-          : 'Agent reconstructs the canonical payload from the 402 response fields and verifies the signature against the server\'s public key...'
+          ? 'Agent reconstructs the canonical payload from the payment fields it received — including the <span class="bad">tampered payTo address</span> — ' +
+            'hashes it with SHA-256, and checks the server\'s signature. ' +
+            'The server signed the <span class="good">real merchant address</span>, but the hash now contains the <span class="bad">attacker\'s address</span>. ' +
+            'The signature won\'t match...'
+          : 'Agent reconstructs the canonical payload from the 402 response fields, hashes it with SHA-256, ' +
+            'and verifies the server\'s signature using the public key from the DID document...'
       );
       break;
 
@@ -338,9 +381,10 @@ function handleEvent(data) {
         document.getElementById('agent-result').textContent = 'INTEGRITY VERIFIED';
         document.getElementById('wallet-result').className = 'result-banner success';
         document.getElementById('wallet-result').textContent = 'Safe to sign payment';
-        narrate('Result',
+        narrate('Step 5 — Wallet signs payment',
           'Signature matches. The payment instruction is <strong>authentic and untampered</strong>. ' +
-          'The wallet can safely sign the EIP-712 payment, knowing the payTo address and amount came directly from the server.'
+          'The wallet can safely sign the EIP-712 payment, knowing the payTo address and amount came directly from the merchant.',
+          'success'
         );
       } else {
         setStep('a-verify', 'fail');
@@ -350,10 +394,14 @@ function handleEvent(data) {
         document.getElementById('wallet-result').className = 'result-banner fail';
         document.getElementById('wallet-result').textContent = 'Wallet refuses to sign';
         document.getElementById('arrow-2').className = 'arrow-col';
-        narrate('Result',
-          '<strong>Signature mismatch.</strong> The payment fields the agent presented don\'t match what the server signed. ' +
-          'The payTo address was altered after the server\'s response. ' +
-          '<strong>Without integrity verification, the wallet would have signed — sending funds to the attacker.</strong>'
+        narrate('Step 5 — Wallet REFUSES to sign',
+          '<strong>Signature mismatch — tamper detected.</strong> The agent received payment fields with the attacker\'s address, ' +
+          'but the server\'s signature was computed over the real merchant address. The SHA-256 hash didn\'t match, ' +
+          'so the signature verification failed.' +
+          '<br><br><strong>The wallet refuses to sign. No funds are sent.</strong>' +
+          '<br><br>Without integrity verification, the wallet would have blindly signed the tampered instruction — ' +
+          'sending funds to the attacker\'s address with no way to recover them.',
+          'fail'
         );
       }
 
