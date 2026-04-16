@@ -275,11 +275,28 @@ async function runSelected() {
   await runFlow(selectedTamper);
 }
 
-// SSE
-const evtSource = new EventSource('/events');
-evtSource.onmessage = (e) => handleEvent(JSON.parse(e.data));
+// SSE — queue events and play back with delays
+const eventQueue = [];
+let isPlaying = false;
 
-function handleEvent(data) {
+const evtSource = new EventSource('/events');
+evtSource.onmessage = (e) => {
+  eventQueue.push(JSON.parse(e.data));
+  if (!isPlaying) playNext();
+};
+
+const STEP_DELAY = 1200; // ms between steps
+
+async function playNext() {
+  if (eventQueue.length === 0) { isPlaying = false; return; }
+  isPlaying = true;
+  const data = eventQueue.shift();
+  await handleEvent(data);
+  // Small delay then play next
+  setTimeout(() => playNext(), data.event === 'flow_started' ? 800 : STEP_DELAY);
+}
+
+async function handleEvent(data) {
   switch (data.event) {
     case 'flow_started':
       isTamper = data.tamper;
@@ -293,15 +310,13 @@ function handleEvent(data) {
         document.getElementById('btn-legit').className = 'scenario-btn active-good';
       }
       setStep('a-request', 'active');
-      narrate('Step 1 of 5',
+      narrate('Step 1 — Agent requests resource',
         isTamper
           ? 'Agent requests a paid resource from the server. A malicious plugin is running inside the agent runtime, waiting to intercept the payment instruction...'
-          : 'Agent requests a paid resource from the server...'
+          : 'Agent makes an HTTP request to the server, expecting premium content.'
       );
-      setTimeout(() => {
-        setStep('a-request', 'success');
-        document.getElementById('arrow-1').className = 'arrow-col lit';
-      }, 600);
+      setStep('a-request', 'success');
+      document.getElementById('arrow-1').className = 'arrow-col lit';
       break;
 
     case 'payment_required': {
@@ -309,15 +324,16 @@ function handleEvent(data) {
       const usdcAmount = (parseInt(data.amount) / 1e6).toFixed(4);
 
       setStep('s-402', 'success');
-      setStep('s-sign', 'active');
-      narrate('Step 2 of 5',
+      setStep('s-sign', 'success');
+      setStep('s-send', 'success');
+      narrate('Step 2 — Server returns signed 402',
         isTamper
           ? `Server returns <strong>402 Payment Required</strong>. Wants <span class="mono">${usdcAmount} USDC</span> on <strong>${network}</strong>, ` +
             `paid to the merchant's real address. The server signs these fields with its ES256 private key. ` +
             `<br><br><span class="bad">But the malicious plugin intercepts the response and swaps the payTo address to the attacker's wallet.</span> ` +
             `The signature still contains the original address — this mismatch is what integrity verification will catch.`
-          : `Server returns <strong>402 Payment Required</strong>. Wants <span class="mono">${usdcAmount} USDC</span> on <strong>${network}</strong>.` +
-            `<br>Server signs the payment fields (payTo, amount, network) with its ES256 private key and includes the signature in the <span class="mono">X-402-Integrity</span> header.`
+          : `Server returns <strong>402 Payment Required</strong>. Wants <span class="mono">${usdcAmount} USDC</span> on <strong>${network}</strong>. ` +
+            `Server signs the payment fields (payTo, amount, network) with its ES256 private key and includes the signature in the <span class="mono">X-402-Integrity</span> header.`
       );
 
       document.getElementById('payment-details').innerHTML =
@@ -325,22 +341,7 @@ function handleEvent(data) {
         `To: <span style="font-family:monospace;font-size:12px">${data.payTo?.slice(0, 14)}...${data.payTo?.slice(-6)}</span>` +
         (data.tampered ? '<br><span style="color:#f44336;font-weight:700">payTo SWAPPED by attacker</span>' : '');
 
-      setTimeout(() => {
-        setStep('s-sign', 'success');
-        setStep('s-send', 'active');
-        setTimeout(() => {
-          setStep('s-send', 'success');
-          setStep('a-receive', 'active');
-          narrate('Step 3 of 5',
-            isTamper
-              ? 'Agent receives the 402 response with the <span class="mono">X-402-Integrity</span> header. ' +
-                'The payment instruction now contains the <span class="bad">attacker\'s address</span>, but the integrity signature was computed over the <span class="good">merchant\'s real address</span>. ' +
-                'The agent doesn\'t know about the swap yet — it will check the signature next.'
-              : 'Agent receives the 402 response and sees the <span class="mono">X-402-Integrity</span> header. ' +
-                'Now it needs to verify the signature before trusting these payment instructions.'
-          );
-        }, 500);
-      }, 800);
+      setStep('a-receive', 'active');
       break;
     }
 
@@ -348,33 +349,39 @@ function handleEvent(data) {
       setStep('a-receive', 'success');
       setStep('a-resolve', 'active');
       document.getElementById('server-did').textContent = data.did;
-      narrate('Step 3 of 5',
-        `Agent fetches <span class="mono">/.well-known/did.json</span> from the server's domain to get its public key. ` +
-        `This is the <strong>did:web</strong> standard — the domain itself proves who owns the key.`
+      narrate('Step 3 — Agent resolves DID document',
+        isTamper
+          ? 'Agent receives the 402 response with the <span class="mono">X-402-Integrity</span> header and fetches <span class="mono">/.well-known/did.json</span> from the server\'s domain. ' +
+            'The payment instruction now contains the <span class="bad">attacker\'s address</span>, but the integrity signature was computed over the <span class="good">merchant\'s real address</span>.'
+          : `Agent fetches <span class="mono">/.well-known/did.json</span> from the server's domain to get its public key. ` +
+            `This is the <strong>did:web</strong> standard — the domain itself proves who owns the key.`
       );
-      setTimeout(() => setStep('a-resolve', 'success'), 500);
+      setStep('a-resolve', 'success');
+      break;
+
+    case 'server_signed':
+      // Skip — covered by payment_required
       break;
 
     case 'agent_verifying':
-      setStep('a-resolve', 'success');
       setStep('a-verify', 'active');
-      narrate('Step 4 of 5',
+      narrate('Step 4 — Agent verifies signature',
         isTamper
           ? 'Agent reconstructs the canonical payload from the payment fields it received — including the <span class="bad">tampered payTo address</span> — ' +
             'hashes it with SHA-256, and checks the server\'s signature. ' +
             'The server signed the <span class="good">real merchant address</span>, but the hash now contains the <span class="bad">attacker\'s address</span>. ' +
             'The signature won\'t match...'
           : 'Agent reconstructs the canonical payload from the 402 response fields, hashes it with SHA-256, ' +
-            'and verifies the server\'s signature using the public key from the DID document...'
+            'and verifies the server\'s signature using the public key from the DID document.'
       );
       break;
 
     case 'integrity_result':
       document.getElementById('reset-link').className = 'reset-link visible';
-      document.getElementById('arrow-2').className = 'arrow-col lit';
 
       if (data.verified) {
         setStep('a-verify', 'success');
+        document.getElementById('arrow-2').className = 'arrow-col lit';
         setStep('w-check', 'success');
         setStep('w-sign', 'success');
         document.getElementById('agent-result').className = 'result-banner success';
@@ -393,7 +400,6 @@ function handleEvent(data) {
         document.getElementById('agent-result').textContent = 'TAMPER DETECTED — REJECTED';
         document.getElementById('wallet-result').className = 'result-banner fail';
         document.getElementById('wallet-result').textContent = 'Wallet refuses to sign';
-        document.getElementById('arrow-2').className = 'arrow-col';
         narrate('Step 5 — Wallet REFUSES to sign',
           '<strong>Signature mismatch — tamper detected.</strong> The agent received payment fields with the attacker\'s address, ' +
           'but the server\'s signature was computed over the real merchant address. The SHA-256 hash didn\'t match, ' +
@@ -405,7 +411,6 @@ function handleEvent(data) {
         );
       }
 
-      // Show terminal command to try it from CLI
       showTerminal(
         isTamper
           ? 'node dist/cli.js pay "http://localhost:3402/paid-content?tamper=true" --require-integrity'
@@ -430,6 +435,8 @@ function handleEvent(data) {
 
 async function runFlow(tamper) {
   resetUI();
+  eventQueue.length = 0;
+  isPlaying = false;
   await new Promise(r => setTimeout(r, 150));
   try {
     await fetch('/api/trigger', {
