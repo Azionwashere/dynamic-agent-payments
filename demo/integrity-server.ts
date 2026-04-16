@@ -161,41 +161,76 @@ async function main() {
     res.sendFile(join(__dirname, 'integrity-ui.html'));
   });
 
-  // API for UI to trigger flows
+  // API for UI to trigger flows — emits events in storytelling order
   app.post('/api/trigger', express.json(), async (req, res) => {
     const { tamper = false } = req.body || {};
-    emitSSE('flow_started', { tamper });
 
-    // Simulate the flow by making a request to ourselves
     try {
+      // Step 1: Agent requests resource
+      emitSSE('step', { num: 1, title: 'Agent requests resource',
+        body: tamper
+          ? 'Agent requests a paid resource from the server. A malicious plugin is running inside the agent runtime, waiting to intercept the payment instruction.'
+          : 'Agent makes an HTTP request to the server, expecting premium content.',
+        state: 'success' });
+
+      // Fetch 402 from ourselves
       const initialRes = await fetch(`http://localhost:${PORT}/paid-content${tamper ? '?tamper=true' : ''}`);
       const body = await initialRes.json();
       const integrityHeader = initialRes.headers.get('x-402-integrity');
+      const accept = body.accepts?.[0];
+      const network = accept?.network === 'eip155:8453' ? 'Base' : accept?.network;
+      const usdcAmount = (parseInt(accept?.amount || '0') / 1e6).toFixed(4);
 
-      emitSSE('server_signed', {
-        hasIntegrity: !!integrityHeader,
-        tamper,
-        accept: body.accepts?.[0],
-      });
+      // Step 2: Server returns signed 402
+      emitSSE('step', { num: 2, title: 'Server returns signed 402',
+        body: tamper
+          ? `Server returns <strong>402 Payment Required</strong>. Wants <b>${usdcAmount} USDC</b> on <b>${network}</b>, paid to the merchant's real address. The server signs these fields with its ES256 private key.<br><br><span style="color:#f44336;font-weight:700">But the malicious plugin intercepts the response and swaps the payTo address to the attacker's wallet.</span> The signature still contains the original address — this mismatch is what integrity verification will catch.`
+          : `Server returns <strong>402 Payment Required</strong>. Wants <b>${usdcAmount} USDC</b> on <b>${network}</b>. Server signs the payment fields (payTo, amount, network) with its ES256 private key and includes the signature in the <code>X-402-Integrity</code> header.`,
+        state: 'success',
+        payTo: accept?.payTo, network: accept?.network, amount: accept?.amount, tampered: tamper });
 
-      // Verify integrity client-side
-      if (integrityHeader) {
-        const { parseIntegrityHeader, verifyIntegrity } = await import('../src/lib/integrity.js');
-        const envelope = parseIntegrityHeader(integrityHeader);
+      if (!integrityHeader) {
+        emitSSE('step', { num: 3, title: 'No integrity header', body: 'Server did not include X-402-Integrity.', state: 'fail' });
+        res.json({ success: false, error: 'No integrity header' });
+        return;
+      }
 
-        emitSSE('agent_verifying', { did: envelope.did, kid: envelope.kid });
+      const { parseIntegrityHeader, verifyIntegrity } = await import('../src/lib/integrity.js');
+      const envelope = parseIntegrityHeader(integrityHeader);
 
-        try {
-          const result = await verifyIntegrity(envelope, body.accepts[0], { allowHttp: true });
-          emitSSE('integrity_result', { verified: true, ...result });
-          res.json({ success: true, integrity: result });
-        } catch (err: any) {
-          emitSSE('integrity_result', { verified: false, error: err.message });
-          res.json({ success: false, error: err.message });
-        }
+      // Step 3: Agent resolves DID
+      emitSSE('step', { num: 3, title: 'Agent resolves DID document',
+        body: tamper
+          ? `Agent fetches <code>/.well-known/did.json</code> from the server's domain to retrieve the public key. The payment instruction now contains the <span style="color:#f44336;font-weight:700">attacker's address</span>, but the integrity signature was computed over the <span style="color:#4caf50;font-weight:700">merchant's real address</span>.`
+          : `Agent fetches <code>/.well-known/did.json</code> from the server's domain to get the public key. This is the <strong>did:web</strong> standard — the domain itself proves who owns the key.`,
+        state: 'success', did: envelope.did });
+
+      // Step 4: Verify signature
+      emitSSE('step', { num: 4, title: 'Agent verifies signature',
+        body: tamper
+          ? `Agent reconstructs the canonical payload from the payment fields — including the <span style="color:#f44336;font-weight:700">tampered payTo address</span> — hashes it with SHA-256, and checks the server's signature. The server signed the <span style="color:#4caf50;font-weight:700">real merchant address</span>, but the hash now contains the <span style="color:#f44336;font-weight:700">attacker's address</span>. The signature won't match...`
+          : 'Agent reconstructs the canonical payload from the 402 response fields, hashes it with SHA-256, and verifies the server\'s signature using the public key from the DID document.',
+        state: 'active' });
+
+      try {
+        const result = await verifyIntegrity(envelope, accept, { allowHttp: true });
+
+        // Step 5: Success
+        emitSSE('step', { num: 5, title: 'Wallet signs payment',
+          body: 'Signature matches. The payment instruction is <strong style="color:#4caf50">authentic and untampered</strong>. The wallet can safely sign the EIP-712 payment, knowing the payTo address and amount came directly from the merchant.',
+          state: 'success', final: 'success', integrity: result });
+
+        res.json({ success: true, integrity: result });
+      } catch (err: any) {
+        // Step 5: Failure
+        emitSSE('step', { num: 5, title: 'Wallet REFUSES to sign',
+          body: `<strong style="color:#f44336">Signature mismatch — tamper detected.</strong> The agent received payment fields with the attacker's address, but the server's signature was computed over the real merchant address. The SHA-256 hash didn't match, so the signature verification failed.<br><br><strong>The wallet refuses to sign. No funds are sent.</strong><br><br>Without integrity verification, the wallet would have blindly signed the tampered instruction — sending funds to the attacker's address with no way to recover them.`,
+          state: 'fail', final: 'fail', error: err.message });
+
+        res.json({ success: false, error: err.message });
       }
     } catch (err: any) {
-      emitSSE('flow_error', { error: err.message });
+      emitSSE('step', { num: 0, title: 'Error', body: err.message, state: 'fail', final: 'fail' });
       res.status(500).json({ error: err.message });
     }
   });
