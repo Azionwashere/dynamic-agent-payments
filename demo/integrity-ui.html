@@ -138,7 +138,6 @@
     <div class="step waiting" id="a-receive"><span class="indicator"></span>Parse 402 + integrity header</div>
     <div class="step waiting" id="a-resolve"><span class="indicator"></span>Fetch DID document from server</div>
     <div class="step waiting" id="a-verify"><span class="indicator"></span>Verify signature over payment fields</div>
-    <div class="step waiting" id="a-decide"><span class="indicator"></span>Accept or reject</div>
     <div class="result-banner" id="agent-result"></div>
   </div>
 
@@ -179,7 +178,7 @@ const NETWORK_NAMES = {
   'eip155:10': 'Optimism',
 };
 
-const ALL_STEPS = ['s-402','s-sign','s-send','a-request','a-receive','a-resolve','a-verify','a-decide','w-check','w-sign'];
+const ALL_STEPS = ['s-402','s-sign','s-send','a-request','a-receive','a-resolve','a-verify','w-check','w-sign'];
 let isTamper = false;
 let selectedTamper = null; // null = nothing selected
 
@@ -333,7 +332,6 @@ function handleEvent(data) {
 
       if (data.verified) {
         setStep('a-verify', 'success');
-        setStep('a-decide', 'success');
         setStep('w-check', 'success');
         setStep('w-sign', 'success');
         document.getElementById('agent-result').className = 'result-banner success';
@@ -346,7 +344,6 @@ function handleEvent(data) {
         );
       } else {
         setStep('a-verify', 'fail');
-        setStep('a-decide', 'fail');
         setStep('w-check', 'fail');
         document.getElementById('agent-result').className = 'result-banner fail';
         document.getElementById('agent-result').textContent = 'TAMPER DETECTED — REJECTED';
