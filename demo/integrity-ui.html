@@ -14,9 +14,15 @@
   .scenarios { display: flex; gap: 16px; margin-bottom: 32px; }
   .scenario-btn { flex: 1; max-width: 360px; padding: 20px; border: 2px solid #222; border-radius: 12px; background: #111; cursor: pointer; transition: all 0.2s; text-align: left; }
   .scenario-btn:hover { border-color: #444; background: #1a1a1a; }
+  .scenario-btn.selected { border-color: #5b5bff; background: #111133; }
   .scenario-btn.active-good { border-color: #4caf50; }
   .scenario-btn.active-bad { border-color: #f44336; }
   .scenario-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .run-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
+  .btn-run { padding: 12px 32px; border: none; border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; background: #5b5bff; color: #fff; transition: all 0.15s; }
+  .btn-run:hover:not(:disabled) { background: #4a4aee; }
+  .btn-run:disabled { opacity: 0.3; cursor: not-allowed; }
+  .run-hint { font-size: 13px; color: #555; }
   .scenario-title { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px; }
   .scenario-desc { font-size: 13px; color: #888; line-height: 1.4; }
   .scenario-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 4px; margin-bottom: 8px; }
@@ -69,16 +75,21 @@
 
 <!-- Scenario picker -->
 <div class="scenarios">
-  <button class="scenario-btn" id="btn-legit" onclick="runFlow(false)">
+  <button class="scenario-btn" id="btn-legit" onclick="selectScenario(false)">
     <span class="scenario-tag tag-safe">LEGITIMATE</span>
     <div class="scenario-title">Normal payment flow</div>
     <div class="scenario-desc">Server signs the payment instruction. Agent verifies the signature matches. Wallet proceeds to sign.</div>
   </button>
-  <button class="scenario-btn" id="btn-tamper" onclick="runFlow(true)">
+  <button class="scenario-btn" id="btn-tamper" onclick="selectScenario(true)">
     <span class="scenario-tag tag-attack">ATTACK</span>
     <div class="scenario-title">Compromised agent swaps payTo</div>
     <div class="scenario-desc">A malicious plugin changes the recipient address after the server's 402 response. The signature won't match.</div>
   </button>
+</div>
+
+<div class="run-bar">
+  <button class="btn-run" id="btn-run" disabled onclick="runSelected()">Run Demo</button>
+  <span class="run-hint" id="run-hint">Select a scenario above to begin</span>
 </div>
 
 <!-- Narration bar -->
@@ -150,6 +161,7 @@ const NETWORK_NAMES = {
 
 const ALL_STEPS = ['s-402','s-sign','s-send','a-request','a-receive','a-resolve','a-verify','a-decide','w-check','w-sign'];
 let isTamper = false;
+let selectedTamper = null; // null = nothing selected
 
 function setStep(id, state) {
   const el = document.getElementById(id);
@@ -176,6 +188,24 @@ function resetUI() {
   document.getElementById('btn-tamper').disabled = false;
   document.getElementById('btn-legit').className = 'scenario-btn';
   document.getElementById('btn-tamper').className = 'scenario-btn';
+  document.getElementById('btn-run').disabled = true;
+  document.getElementById('run-hint').textContent = 'Select a scenario above to begin';
+  selectedTamper = null;
+}
+
+function selectScenario(tamper) {
+  selectedTamper = tamper;
+  document.getElementById('btn-legit').className = 'scenario-btn' + (tamper === false ? ' selected' : '');
+  document.getElementById('btn-tamper').className = 'scenario-btn' + (tamper === true ? ' selected' : '');
+  document.getElementById('btn-run').disabled = false;
+  document.getElementById('run-hint').textContent = tamper
+    ? 'Ready — will simulate a compromised agent swapping payTo'
+    : 'Ready — will run a normal verified payment flow';
+}
+
+async function runSelected() {
+  if (selectedTamper === null) return;
+  await runFlow(selectedTamper);
 }
 
 // SSE
@@ -188,6 +218,8 @@ function handleEvent(data) {
       isTamper = data.tamper;
       document.getElementById('btn-legit').disabled = true;
       document.getElementById('btn-tamper').disabled = true;
+      document.getElementById('btn-run').disabled = true;
+      document.getElementById('run-hint').textContent = 'Running...';
       if (isTamper) {
         document.getElementById('btn-tamper').className = 'scenario-btn active-bad';
       } else {
