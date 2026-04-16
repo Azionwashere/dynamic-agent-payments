@@ -98,6 +98,26 @@ export interface X402PaymentResult {
   paymentId?: string;
   /** Which protocol was used */
   protocol?: 'x402-coinbase' | 'mpp';
+  /** Payment instruction integrity verification result */
+  integrity?: IntegrityInfo;
+}
+
+export interface IntegrityInfo {
+  verified: boolean;
+  did: string;
+  kid: string;
+  alg: string;
+  domain: string;
+}
+
+export interface IntegrityEnvelope {
+  v: number;
+  did: string;
+  kid: string;
+  alg: string;
+  iat: number;
+  exp: number;
+  sig: string;
 }
 
 export interface WalletInfo {

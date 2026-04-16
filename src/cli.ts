@@ -40,9 +40,10 @@ detect payment requirements, sign via Dynamic wallet, retry.
 Supports both x402 v1 (Coinbase) and v2 (Fireblocks facilitator).
 
 Options:
-  --method   HTTP method (GET or POST, default: GET)
-  --body     Request body for POST (JSON string)
-  --memo     Payment metadata (JSON string, e.g. '{"purpose":"price-feed"}')
+  --method              HTTP method (GET or POST, default: GET)
+  --body                Request body for POST (JSON string)
+  --memo                Payment metadata (JSON string, e.g. '{"purpose":"price-feed"}')
+  --require-integrity   Require server to provide signed integrity proof (X-402-Integrity)
 `.trim();
 
 const PAY_MPP_USAGE = `
@@ -187,6 +188,7 @@ async function cmdPay(argv: string[]) {
       method: { type: 'string', short: 'm' },
       body: { type: 'string', short: 'b' },
       memo: { type: 'string' },
+      'require-integrity': { type: 'boolean', default: false },
     },
     allowPositionals: true,
   });
@@ -201,6 +203,7 @@ async function cmdPay(argv: string[]) {
 
   loadConfig();
   const emit = createEventEmitter();
+  if (values['require-integrity']) console.error('Integrity verification: required');
   console.error(`Requesting ${url}...`);
 
   const result = await payX402({
@@ -208,6 +211,7 @@ async function cmdPay(argv: string[]) {
     method,
     body: values.body,
     memo: parseJson(values.memo, 'memo'),
+    requireIntegrity: values['require-integrity'] ?? false,
   }, emit);
 
   console.log(JSON.stringify(result, null, 2));

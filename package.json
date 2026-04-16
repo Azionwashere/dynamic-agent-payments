@@ -15,7 +15,8 @@
     "test:run": "vitest run",
     "cli": "node dist/cli.js",
     "mcp": "node dist/mcp/server.js",
-    "dashboard": "node dist/dashboard/server.js"
+    "dashboard": "node dist/dashboard/server.js",
+    "demo:integrity": "npx tsx demo/integrity-server.ts"
   },
   "dependencies": {
     "@dynamic-labs-wallet/node": "^0.0.323",

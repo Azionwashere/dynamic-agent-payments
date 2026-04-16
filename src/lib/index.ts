@@ -40,4 +40,12 @@ export {
   submitToFacilitator,
   handlePaywall,
 } from './x402-handler.js';
+export {
+  parseIntegrityHeader,
+  didWebToUrl,
+  resolveDidWeb,
+  buildCanonicalPayload,
+  verifyIntegrity,
+  signIntegrity,
+} from './integrity.js';
 export type * from './types.js';

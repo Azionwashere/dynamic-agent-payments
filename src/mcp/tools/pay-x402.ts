@@ -4,7 +4,8 @@ import {
   handleMppPaywall,
   handleCoinbaseX402,
 } from '../../lib/x402-handler.js';
-import type { EventCallback, X402PaymentResult } from '../../lib/types.js';
+import { parseIntegrityHeader, verifyIntegrity } from '../../lib/integrity.js';
+import type { EventCallback, X402PaymentResult, IntegrityInfo } from '../../lib/types.js';
 import { emitEvent } from '../../lib/events.js';
 
 export const payX402Schema = z.object({
@@ -13,6 +14,9 @@ export const payX402Schema = z.object({
   body: z.string().optional().describe('Request body for POST requests'),
   memo: z.record(z.unknown()).optional().describe(
     'Metadata to tag this payment (e.g., { "purpose": "crypto-price-feed" })'
+  ),
+  requireIntegrity: z.boolean().optional().default(false).describe(
+    'Require the server to provide a signed integrity proof (X-402-Integrity header)'
   ),
 });
 
@@ -29,17 +33,21 @@ export async function payX402(
 
   // Step 1: Make the request — expect 402
   let initialRes: Response;
+  const requestHeaders: Record<string, string> = {};
+  if (input.body) requestHeaders['Content-Type'] = 'application/json';
+  if (input.requireIntegrity) requestHeaders['X-402-Require-Integrity'] = 'true';
+
   try {
     initialRes = await fetch(input.url, {
       method: input.method,
-      ...(input.body ? { body: input.body, headers: { 'Content-Type': 'application/json' } } : {}),
+      headers: requestHeaders,
+      ...(input.body ? { body: input.body } : {}),
     });
   } catch (err: any) {
     throw new Error(`Network error fetching ${input.url}: ${err.cause?.message ?? err.message}`);
   }
 
   if (initialRes.ok) {
-    // Not a 402 — no payment needed
     const rawText = await initialRes.text();
     let data: unknown;
     try { data = JSON.parse(rawText); } catch { data = rawText; }
@@ -56,11 +64,56 @@ export async function payX402(
     throw new Error(`Expected 402 Payment Required, got ${initialRes.status}`);
   }
 
-  // Step 2: Detect protocol from headers and body
+  // Step 2: Extract headers
   const headers: Record<string, string> = {};
   initialRes.headers.forEach((v, k) => { headers[k] = v; });
 
   const headerProtocol = detectProtocol(headers);
+
+  // Step 2b: Check payment instruction integrity
+  let integrity: IntegrityInfo | undefined;
+  const integrityHeader = headers['x-402-integrity'];
+
+  if (integrityHeader) {
+    try {
+      const envelope = parseIntegrityHeader(integrityHeader);
+
+      // We need the accept object for verification — parse body early for x402-coinbase
+      let accept: any;
+      if (headerProtocol === 'mpp') {
+        // For MPP, integrity verification uses header fields — skip for now
+        accept = {};
+      } else {
+        const bodyClone = initialRes.clone();
+        const body = await bodyClone.json().catch(() => null);
+        accept = body?.accepts?.[0] ?? {};
+      }
+
+      integrity = await verifyIntegrity(envelope, accept, { allowHttp: true });
+
+      if (emit) emitEvent(emit, 'x402_integrity_verified', {
+        did: integrity.did,
+        kid: integrity.kid,
+        alg: integrity.alg,
+        domain: integrity.domain,
+        url: input.url,
+      });
+    } catch (err: any) {
+      if (emit) emitEvent(emit, 'x402_integrity_failed', {
+        error: err.message,
+        url: input.url,
+      });
+      throw new Error(`Payment instruction integrity check failed: ${err.message}`);
+    }
+  } else if (input.requireIntegrity) {
+    if (emit) emitEvent(emit, 'x402_integrity_required_missing', { url: input.url });
+    throw new Error(
+      'Server did not provide integrity proof (X-402-Integrity header). ' +
+      'Remove --require-integrity to proceed without verification.'
+    );
+  } else {
+    if (emit) emitEvent(emit, 'x402_integrity_missing', { url: input.url });
+  }
 
   // Step 3: Handle based on protocol
 
@@ -91,6 +144,7 @@ export async function payX402(
       settlementHash: retryRes.headers.get('payment-receipt') ?? '',
       accessGranted: retryRes.ok,
       protocol: 'mpp',
+      integrity,
       responseData,
     };
   }
@@ -111,7 +165,7 @@ export async function payX402(
         ...(input.memo ? { memo: input.memo } : {}),
       });
 
-      return { ...result, protocol: 'x402-coinbase' };
+      return { ...result, protocol: 'x402-coinbase', integrity };
     }
   }
 
