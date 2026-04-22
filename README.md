@@ -78,6 +78,9 @@ npx dynamic-agent-payments pay https://x402-api.fly.dev/api/price-feed
 # Pay for an MPP-protected resource (Stripe, custom MPP servers)
 npx dynamic-agent-payments pay-mpp https://api.example.com/resource
 
+# One-time EIP-7702 upgrade for ERC-7710 delegation payments (per wallet per chain)
+npx dynamic-agent-payments setup-delegation --chain-id 84532
+
 # Fund agent wallet (swap ETH on Ethereum → USDC on Base)
 npx dynamic-agent-payments fund --amount 5.00 \
   --from-chain-id 1 --from-token 0x0000...0000 \
@@ -147,6 +150,7 @@ Restart Claude Code. Your agent can now pay for x402 services automatically.
 
 **Payment Protocols:**
 - **Coinbase x402** — `pay` command (TransferWithAuthorization on Base)
+- **ERC-7710 delegation** — `pay` command (when merchant requires `assetTransferMethod: erc7710`); agent signs a scoped delegation via an EIP-7702-upgraded EOA — no direct token transfer, no unlimited approvals. Run `setup-delegation` once per wallet per chain to install the EIP7702StatelessDeleGator.
 - **MPP** — `pay-mpp` command (EIP-712 methods: transferwithauth, permit, opdata)
 
 ## Why Dynamic
@@ -180,6 +184,7 @@ Shows every step: paywall detection → balance check → swap → signing → p
 | `SOL_WALLET_ADDRESS` | No | Solana wallet address (auto-set by `wallet` command) |
 | `SOL_WALLET_ID` | No | Solana wallet ID (auto-set by `wallet` command) |
 | `MIN_FUNDING_THRESHOLD_USD` | No | Minimum swap amount to avoid bridging for tiny payments (default $1.00) |
+| `RELAYER_PRIVATE_KEY` | For ERC-7710 | Funded EOA that submits the one-time EIP-7702 type-4 transaction and pays gas. Only needed for `setup-delegation`. |
 
 ## Development
 
