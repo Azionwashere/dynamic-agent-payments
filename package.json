@@ -15,7 +15,8 @@
     "test:run": "vitest run",
     "cli": "node dist/cli.js",
     "mcp": "node dist/mcp/server.js",
-    "dashboard": "node dist/dashboard/server.js"
+    "dashboard": "node dist/dashboard/server.js",
+    "mock-merchant": "npx ts-node --esm scripts/mock-merchant.ts"
   },
   "dependencies": {
     "@dynamic-labs-wallet/node": "^0.0.323",

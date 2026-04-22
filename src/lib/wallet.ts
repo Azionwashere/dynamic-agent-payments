@@ -18,6 +18,7 @@ const walletCache = new Map<string, WalletInfo>();
 /** Public RPC endpoints per chain. Override with RPC_URL env var. */
 const PUBLIC_RPCS: Record<string, string> = {
   '1': 'https://eth.llamarpc.com',
+  '11155111': 'https://ethereum-sepolia-rpc.publicnode.com',
   '8453': 'https://mainnet.base.org',
   '84532': 'https://sepolia.base.org',
   '137': 'https://polygon-rpc.com',
@@ -27,7 +28,7 @@ const PUBLIC_RPCS: Record<string, string> = {
   '43113': 'https://api.avax-test.network/ext/bc/C/rpc',
 };
 
-function getPublicRpc(chainId: string): string {
+export function getPublicRpc(chainId: string): string {
   return process.env.RPC_URL || PUBLIC_RPCS[chainId] || `https://mainnet.base.org`;
 }
 
@@ -280,6 +281,24 @@ export async function signTypedData(typedData: any): Promise<string> {
   });
 
   return signature;
+}
+
+/**
+ * Sign an EIP-7702 authorization tuple with the agent's MPC wallet.
+ * Returns the viem Signature object ({ r, s, yParity }) needed to
+ * build the authorizationList for a type-4 transaction.
+ */
+export async function signAuthorization(authorization: {
+  address: `0x${string}`;
+  chainId: number;
+  nonce: number;
+}): Promise<{ r: `0x${string}`; s: `0x${string}`; yParity: 0 | 1 }> {
+  const client = await getEvmClient();
+  const wallet = getWallet();
+  return (client as any).signAuthorization({
+    authorization,
+    accountAddress: wallet.accountAddress,
+  });
 }
 
 /**

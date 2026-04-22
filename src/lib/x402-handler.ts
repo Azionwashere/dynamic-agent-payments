@@ -1,5 +1,6 @@
 import type { X402PaymentRequirements, X402PaymentResult } from './types.js';
 import { signTypedData, getWalletAddress } from './wallet.js';
+import { handleErc7710Payment } from './delegation.js';
 
 // ============================================================
 // Protocol Detection
@@ -418,9 +419,53 @@ export async function handleCoinbaseX402(
   body?: string,
   resource?: X402Resource,
 ): Promise<X402PaymentResult & { responseData?: unknown }> {
+  const chainId = parseChainId(accept.network);
+  const mechanism = (accept.extra?.assetTransferMethod ?? '').toLowerCase();
+
+  // ── ERC-7710: MetaMask Delegation Framework via EIP-7702 ──────────────────
+  if (mechanism === 'erc7710') {
+    const delegationBody = await handleErc7710Payment(accept, chainId);
+
+    const paymentPayload = {
+      x402Version: 2,
+      ...(resource ? { resource } : {}),
+      accepted: accept,
+      payload: delegationBody,
+    };
+
+    const encodedPayload = Buffer.from(JSON.stringify(paymentPayload)).toString('base64');
+
+    const retryRes = await fetch(url, {
+      method,
+      headers: {
+        'payment-signature': encodedPayload,
+        'X-PAYMENT': encodedPayload,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body ? { body } : {}),
+    });
+
+    const responseText = await retryRes.text();
+    let responseData: unknown;
+    try { responseData = JSON.parse(responseText); } catch { responseData = responseText; }
+
+    const paymentResponse = retryRes.headers.get('payment-response') ?? retryRes.headers.get('x-payment-response');
+    let settlementHash = paymentResponse ?? '';
+    if (paymentResponse) {
+      try {
+        const decoded = JSON.parse(Buffer.from(paymentResponse, 'base64').toString('utf-8'));
+        const hash = typeof decoded === 'object'
+          ? (decoded.txHash ?? decoded.transaction ?? paymentResponse)
+          : decoded;
+        settlementHash = typeof hash === 'string' ? hash : paymentResponse;
+      } catch { /* keep raw */ }
+    }
+
+    return { settlementHash, accessGranted: retryRes.ok, protocol: 'x402-coinbase', responseData };
+  }
+
   const walletAddress = await getWalletAddress();
   const amount = accept.amount ?? accept.maxAmountRequired ?? '0';
-  const chainId = parseChainId(accept.network);
 
   // Build EIP-712 TransferWithAuthorization typed data
   const nonce = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))

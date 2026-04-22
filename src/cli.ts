@@ -3,7 +3,7 @@ import 'dotenv/config';
 import { parseArgs } from 'node:util';
 import { loadConfig, chainFamily } from './lib/config.js';
 import { createEventEmitter } from './lib/events.js';
-import { getWallet, createAndPersistWallet, listAllWallets, setActiveWallet } from './lib/wallet.js';
+import { getWallet, createAndPersistWallet, listAllWallets, setActiveWallet, getWalletAddress, getPublicRpc } from './lib/wallet.js';
 import { payX402 } from './mcp/tools/pay-x402.js';
 import { checkBalance } from './mcp/tools/check-balance.js';
 import { fundAgent } from './mcp/tools/fund-agent.js';
@@ -11,25 +11,42 @@ import { getTxStatus } from './mcp/tools/tx-status.js';
 import { detectProtocol, parseMppChallenges, selectChallenge, handleMppPaywall } from './lib/x402-handler.js';
 import { emitEvent } from './lib/events.js';
 import { permit2Approve, permit2Sign, permit2Verify, checkPermit2Allowance, TOKENS, PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY } from './lib/permit2.js';
+import { checkEip7702Status, installDelegatorCode } from './lib/delegation.js';
 
 const USAGE = `
 dynamic-agent-payments — CLI for x402 payments via Dynamic wallets
 
 Commands:
-  wallet             Create or show your wallet addresses
-  wallet list        Show all wallets in this environment
-  wallet use <addr>  Switch active wallet
-  balance            Check token balances
-  pay <url>          Pay for an x402-protected resource
-  pay-mpp <url>      Pay for an MPP-protected resource
-  fund               Fund wallet via checkout swap/bridge
-  permit2 approve    One-time Permit2 token approval
-  permit2 sign       Sign a Permit2 payment (off-chain)
-  permit2 verify     Verify a Permit2 signature
-  status <txId>      Check transaction status
-  dashboard          Open live activity dashboard
+  wallet                  Create or show your wallet addresses
+  wallet list             Show all wallets in this environment
+  wallet use <addr>       Switch active wallet
+  balance                 Check token balances
+  pay <url>               Pay for an x402-protected resource
+  pay-mpp <url>           Pay for an MPP-protected resource
+  fund                    Fund wallet via checkout swap/bridge
+  setup-delegation        One-time EIP-7702 upgrade for ERC-7710 payments
+  permit2 approve         One-time Permit2 token approval
+  permit2 sign            Sign a Permit2 payment (off-chain)
+  permit2 verify          Verify a Permit2 signature
+  status <txId>           Check transaction status
+  dashboard               Open live activity dashboard
 
 Run any command with --help for details.
+`.trim();
+
+const SETUP_DELEGATION_USAGE = `
+Usage: dynamic-agent-payments setup-delegation [options]
+
+One-time setup for ERC-7710 payments via EIP-7702. Installs the
+EIP7702StatelessDeleGator on the agent's EOA so the Dynamic MPC
+wallet can act as an ERC-7710 delegator for x402 payments.
+
+Requires RELAYER_PRIVATE_KEY in .env — a funded EOA that submits
+the type-4 transaction and pays the gas. The agent wallet signs
+the EIP-7702 authorization; the relayer pays and sends.
+
+Options:
+  --chain-id   Chain ID to install on (required, e.g. 84532 for Base Sepolia)
 `.trim();
 
 const PAY_USAGE = `
@@ -410,6 +427,81 @@ async function cmdStatus(argv: string[]) {
   console.log(JSON.stringify(result, null, 2));
 }
 
+async function cmdSetupDelegation(argv: string[]) {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      help: { type: 'boolean', short: 'h' },
+      'chain-id': { type: 'string' },
+    },
+  });
+
+  if (values.help) { console.log(SETUP_DELEGATION_USAGE); process.exit(0); }
+
+  if (!values['chain-id']) fatal('--chain-id is required (e.g. --chain-id 84532)');
+
+  const relayerKey = process.env.RELAYER_PRIVATE_KEY;
+  if (!relayerKey) {
+    fatal(
+      'RELAYER_PRIVATE_KEY is not set.\n' +
+      'Add a funded EOA private key to .env — it pays gas for the type-4 tx.\n' +
+      '  RELAYER_PRIVATE_KEY=0x...',
+    );
+  }
+
+  const chainId = parseInt(values['chain-id'], 10);
+  if (isNaN(chainId)) fatal('--chain-id must be a number');
+
+  loadConfig();
+  const walletAddress = await getWalletAddress();
+  const rpcUrl = getPublicRpc(String(chainId));
+
+  console.error(`\nAgent wallet:  ${walletAddress}`);
+  console.error(`Chain ID:      ${chainId}`);
+  console.error(`RPC:           ${rpcUrl}\n`);
+
+  // Check current status
+  console.error('Checking EIP-7702 status...');
+  const status = await checkEip7702Status(walletAddress, chainId, rpcUrl);
+
+  if (status === 'installed') {
+    console.log(JSON.stringify({
+      status: 'already_installed',
+      address: walletAddress,
+      chainId,
+      message: 'EIP7702StatelessDeleGator is already installed. Ready for ERC-7710 payments.',
+    }, null, 2));
+    return;
+  }
+
+  if (status === 'other') {
+    fatal(
+      `EOA ${walletAddress} already has code that is NOT the EIP7702StatelessDeleGator.\n` +
+      `Submit a new EIP-7702 tx to override it, or use a different wallet.`,
+    );
+  }
+
+  // Install via relayer
+  console.error('Installing EIP7702StatelessDeleGator...');
+  console.error('  Dynamic MPC wallet signs the EIP-7702 authorization...');
+  console.error('  Relayer submits the type-4 transaction...');
+
+  const txHash = await installDelegatorCode(
+    walletAddress,
+    chainId,
+    relayerKey as `0x${string}`,
+    rpcUrl,
+  );
+
+  console.log(JSON.stringify({
+    status: 'installed',
+    address: walletAddress,
+    chainId,
+    txHash,
+    message: 'EIP7702StatelessDeleGator installed. Agent can now pay via ERC-7710 (set MECHANISM=erc7710).',
+  }, null, 2));
+}
+
 async function cmdPermit2(argv: string[]) {
   loadConfig();
   const sub = argv[0];
@@ -556,14 +648,15 @@ async function main() {
   }
 
   switch (command) {
-    case 'wallet':       await cmdWallet(rest); break;
-    case 'pay':       await cmdPay(rest); break;
-    case 'pay-mpp':   await cmdPayMpp(rest); break;
-    case 'balance':   await cmdBalance(rest); break;
-    case 'fund':         await cmdFund(rest); break;
-    case 'permit2':      await cmdPermit2(rest); break;
-    case 'status':       await cmdStatus(rest); break;
-    case 'dashboard': await import('./dashboard/server.js'); break;
+    case 'wallet':            await cmdWallet(rest); break;
+    case 'pay':               await cmdPay(rest); break;
+    case 'pay-mpp':           await cmdPayMpp(rest); break;
+    case 'balance':           await cmdBalance(rest); break;
+    case 'fund':              await cmdFund(rest); break;
+    case 'setup-delegation':  await cmdSetupDelegation(rest); break;
+    case 'permit2':           await cmdPermit2(rest); break;
+    case 'status':            await cmdStatus(rest); break;
+    case 'dashboard':         await import('./dashboard/server.js'); break;
     default:
       console.error(`Unknown command: ${command}\n`);
       console.error(USAGE);
